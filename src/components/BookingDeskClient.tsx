@@ -705,12 +705,12 @@ export function BookingDeskClient({
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        {/* <div>
+        <div>
           <h1 className="text-2xl font-bold text-slate-900">Booking Officer POS Desk</h1>
           <p className="text-sm text-slate-600">
             Fast officer-only ticket entry, member subs lookup, smart seating &amp; physical stub tracking.
           </p>
-        </div> */}
+        </div>
 
         <div className="w-full flex flex-col md:flex-row items-stretch md:items-center gap-2">
           <select
