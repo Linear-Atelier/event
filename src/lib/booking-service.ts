@@ -35,10 +35,16 @@ export interface CreateBookingInput {
   checkInMethod?: 'qr_scan' | 'manual_code' | 'door_sale'
 }
 
-export async function generateNextBookingCode(payload: Payload): Promise<string> {
+export async function generateNextBookingCode(
+  payload: Payload,
+  eventId: number,
+  eventCode: string,
+): Promise<string> {
+  const prefix = eventCode.trim().toUpperCase()
   const latest = await payload.find({
     collection: 'bookings',
     overrideAccess: true,
+    where: { event: { equals: eventId } },
     sort: '-id',
     limit: 1,
     depth: 0,
@@ -46,14 +52,14 @@ export async function generateNextBookingCode(payload: Payload): Promise<string>
   let nextNum = 1
   if (latest.docs.length > 0) {
     const lastCode = latest.docs[0].bookingCode || ''
-    const match = lastCode.match(/B(\d+)/i)
+    const match = lastCode.match(/B(\d+)$/i)
     if (match) {
       nextNum = parseInt(match[1], 10) + 1
     } else {
       nextNum = Number(latest.docs[0].id) + 1
     }
   }
-  return `B${String(nextNum).padStart(3, '0')}`
+  return `${prefix}-B${String(nextNum).padStart(3, '0')}`
 }
 
 export async function createFullBooking(input: CreateBookingInput) {
@@ -216,7 +222,7 @@ export async function createFullBooking(input: CreateBookingInput) {
     }
   }
 
-  const bookingCode = await generateNextBookingCode(payload)
+  const bookingCode = await generateNextBookingCode(payload, eventDoc.id, eventDoc.code)
   const effectivePaymentStatus =
     input.paymentStatus ||
     (input.paymentMode === 'PAY_AT_DOOR' ? 'pending' : 'paid')
@@ -275,7 +281,7 @@ export async function createFullBooking(input: CreateBookingInput) {
 
     for (let i = 0; i < line.quantity; i++) {
       ticketCounter += 1
-      const ticketCode = `${bookingCode}-T${String(ticketCounter).padStart(2, '0')}`
+      const ticketCode = `${bookingCode}-T${String(ticketCounter).padStart(3, '0')}`
       const ticketPaxEntries = line.paxList.slice(
         i * paxPerTicket,
         (i + 1) * paxPerTicket,

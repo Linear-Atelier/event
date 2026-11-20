@@ -180,34 +180,43 @@ export function BookingDeskClient({
   }, [])
 
   useEffect(() => {
-    if (selectedEventId) {
-      loadEventMeta(selectedEventId)
-    }
+    if (!selectedEventId) return
+    const timer = setTimeout(() => {
+      void loadEventMeta(selectedEventId)
+    }, 0)
+    return () => clearTimeout(timer)
   }, [selectedEventId, loadEventMeta])
 
   // Debounced member search directly on Holder Full Name input
   useEffect(() => {
     const q = holderName.trim()
-    if (!holderFocused || selectedMember || q.length < 2) {
-      setMemberResults([])
-      return
-    }
+    if (!holderFocused || selectedMember || q.length < 2) return
+
+    let cancelled = false
     const timer = setTimeout(async () => {
       setSearchingMembers(true)
       try {
         const res = await fetch(`/api/members/search?q=${encodeURIComponent(q)}`, {
           credentials: 'include',
         })
-        if (res.ok) {
+        if (res.ok && !cancelled) {
           const data = await res.json()
           setMemberResults(data.members || [])
         }
       } finally {
-        setSearchingMembers(false)
+        if (!cancelled) setSearchingMembers(false)
       }
     }, 200)
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [holderName, holderFocused, selectedMember])
+
+  const visibleMemberResults =
+    holderFocused && !selectedMember && holderName.trim().length >= 2
+      ? memberResults
+      : []
 
   function selectMember(m: MemberResult) {
     setSelectedMember(m)
@@ -314,26 +323,33 @@ export function BookingDeskClient({
     : false
 
   useEffect(() => {
-    if (!activePaxKey || activePaxHasLinkedMember || activePaxQuery.length < 2) {
-      setPaxMemberResults([])
-      return
-    }
+    if (!activePaxKey || activePaxHasLinkedMember || activePaxQuery.length < 2) return
+
+    let cancelled = false
     const timer = setTimeout(async () => {
       setSearchingPax(true)
       try {
         const res = await fetch(`/api/members/search?q=${encodeURIComponent(activePaxQuery)}`, {
           credentials: 'include',
         })
-        if (res.ok) {
+        if (res.ok && !cancelled) {
           const data = await res.json()
           setPaxMemberResults(data.members || [])
         }
       } finally {
-        setSearchingPax(false)
+        if (!cancelled) setSearchingPax(false)
       }
     }, 200)
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [activePaxKey, activePaxQuery, activePaxHasLinkedMember])
+
+  const visiblePaxMemberResults =
+    activePaxKey && !activePaxHasLinkedMember && activePaxQuery.length >= 2
+      ? paxMemberResults
+      : []
 
   function selectPaxMember(key: string, m: MemberResult) {
     setPaxDetails((prev) => ({
@@ -549,9 +565,9 @@ export function BookingDeskClient({
                 paxNamesByTicket.get(t.id) ||
                 (t.attendeeNames
                   ? t.attendeeNames
-                      .split(',')
-                      .map((n) => n.trim())
-                      .filter(Boolean)
+                    .split(',')
+                    .map((n) => n.trim())
+                    .filter(Boolean)
                   : []),
             }),
           ),
@@ -595,11 +611,11 @@ export function BookingDeskClient({
           b.id !== bookingId
             ? b
             : {
-                ...b,
-                tickets: b.tickets.map((t) =>
-                  t.id !== ticketId ? t : { ...t, physicalIssued: !current },
-                ),
-              },
+              ...b,
+              tickets: b.tickets.map((t) =>
+                t.id !== ticketId ? t : { ...t, physicalIssued: !current },
+              ),
+            },
         ),
       )
       setManageMessage(!current ? 'Physical ticket marked issued.' : 'Physical ticket unmarked.')
@@ -673,10 +689,10 @@ export function BookingDeskClient({
         prev.map((b) =>
           b.id === editingTablesFor.id
             ? {
-                ...b,
-                tablesSummary: data.tablesSummary,
-                assignedTableLabels: [...editSelectedTables],
-              }
+              ...b,
+              tablesSummary: data.tablesSummary,
+              assignedTableLabels: [...editSelectedTables],
+            }
             : b,
         ),
       )
@@ -705,42 +721,44 @@ export function BookingDeskClient({
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
+        {/* <div>
           <h1 className="text-2xl font-bold text-slate-900">Booking Officer POS Desk</h1>
           <p className="text-sm text-slate-600">
             Fast officer-only ticket entry, member subs lookup, smart seating &amp; physical stub tracking.
           </p>
-        </div>
+        </div> */}
 
         <div className="w-full flex flex-col md:flex-row items-stretch md:items-center gap-2">
           <select
             value={selectedEventId}
             onChange={(e) => setSelectedEventId(Number(e.target.value))}
-            className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+            className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold text-slate-800"
           >
             {events.map((ev) => (
               <option key={ev.id} value={ev.id}>
-                {ev.code} — {ev.name}
+                {ev.name} — {ev.code}
               </option>
             ))}
           </select>
 
-          <div className="flex-1 flex rounded-lg border border-slate-200 bg-white p-1">
+          <div className="flex flex-1 rounded-2xl bg-slate-100/90 p-1">
             <button
               type="button"
               onClick={() => setMode('new')}
-              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold ${
-                mode === 'new' ? 'bg-sky-600 text-white' : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`flex-1 rounded-xl px-3 py-2 text-xs font-bold transition ${mode === 'new'
+                ? 'bg-white text-slate-950 shadow-xs'
+                : 'text-slate-500 hover:text-slate-800'
+                }`}
             >
               New Booking
             </button>
             <button
               type="button"
               onClick={() => setMode('manage')}
-              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold ${
-                mode === 'manage' ? 'bg-sky-600 text-white' : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`flex-1 rounded-xl px-3 py-2 text-xs font-bold transition ${mode === 'manage'
+                ? 'bg-white text-slate-950 shadow-xs'
+                : 'text-slate-500 hover:text-slate-800'
+                }`}
             >
               Manage / Stubs ({recentBookings.length})
             </button>
@@ -766,7 +784,7 @@ export function BookingDeskClient({
             )}
 
             {/* 1. Unified Holder Lookup, Ticket Selection & Required Attendee Names */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="bg-white py-2">
               <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900">
                   <UserCheck className="h-4 w-4 text-sky-600" />
@@ -775,13 +793,12 @@ export function BookingDeskClient({
                 {selectedMember && (
                   <div className="flex items-center gap-2">
                     <span
-                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase ${
-                        selectedMember.subsStatus === 'active'
-                          ? 'bg-emerald-600 text-white'
-                          : selectedMember.subsStatus === 'arrears'
-                            ? 'bg-amber-500 text-white'
-                            : 'bg-rose-600 text-white'
-                      }`}
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase ${selectedMember.subsStatus === 'active'
+                        ? 'bg-emerald-600 text-white'
+                        : selectedMember.subsStatus === 'arrears'
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-rose-600 text-white'
+                        }`}
                     >
                       {selectedMember.memberCode} · Subs: {selectedMember.subsStatus}
                     </span>
@@ -824,9 +841,9 @@ export function BookingDeskClient({
                     )}
                   </div>
 
-                  {holderFocused && !selectedMember && memberResults.length > 0 && (
+                  {visibleMemberResults.length > 0 && (
                     <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                      {memberResults.map((m) => (
+                      {visibleMemberResults.map((m) => (
                         <button
                           key={m.id}
                           type="button"
@@ -845,13 +862,12 @@ export function BookingDeskClient({
                             </div>
                           </div>
                           <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                              m.subsStatus === 'active'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : m.subsStatus === 'arrears'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-rose-100 text-rose-800'
-                            }`}
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${m.subsStatus === 'active'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : m.subsStatus === 'arrears'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-rose-100 text-rose-800'
+                              }`}
                           >
                             {m.subsStatus}
                           </span>
@@ -907,11 +923,10 @@ export function BookingDeskClient({
                       return (
                         <div
                           key={p.id}
-                          className={`flex items-center justify-between rounded-lg border p-3 transition ${
-                            qty > 0
-                              ? 'border-sky-500 bg-sky-50/50'
-                              : 'border-slate-200 bg-white'
-                          }`}
+                          className={`flex items-center justify-between rounded-lg border p-3 transition ${qty > 0
+                            ? 'border-sky-500 bg-sky-50/50'
+                            : 'border-slate-200 bg-white'
+                            }`}
                         >
                           <div>
                             <div className="flex items-center gap-1.5">
@@ -1020,13 +1035,12 @@ export function BookingDeskClient({
                                   {entry.memberId && (
                                     <div className="flex items-center gap-1">
                                       <span
-                                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                                          entry.subsStatus === 'active'
-                                            ? 'bg-emerald-100 text-emerald-800'
-                                            : entry.subsStatus === 'arrears'
-                                              ? 'bg-amber-100 text-amber-800'
-                                              : 'bg-rose-100 text-rose-800'
-                                        }`}
+                                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${entry.subsStatus === 'active'
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : entry.subsStatus === 'arrears'
+                                            ? 'bg-amber-100 text-amber-800'
+                                            : 'bg-rose-100 text-rose-800'
+                                          }`}
                                       >
                                         {entry.memberCode} · {entry.subsStatus}
                                       </span>
@@ -1060,11 +1074,10 @@ export function BookingDeskClient({
                                     }
                                     onChange={(e) => updatePaxName(paxKey, e.target.value)}
                                     placeholder={`Search member or type Pax ${pIdx + 1} name...`}
-                                    className={`w-full rounded-lg border bg-white py-1.5 pl-8 pr-3 text-xs focus:border-sky-500 focus:outline-none ${
-                                      !entry.name.trim()
-                                        ? 'border-amber-300'
-                                        : 'border-slate-300'
-                                    }`}
+                                    className={`w-full rounded-lg border bg-white py-1.5 pl-8 pr-3 text-xs focus:border-sky-500 focus:outline-none ${!entry.name.trim()
+                                      ? 'border-amber-300'
+                                      : 'border-slate-300'
+                                      }`}
                                   />
                                   {isFocused && searchingPax && (
                                     <span className="absolute right-2.5 top-2 text-[10px] text-slate-400">
@@ -1075,9 +1088,9 @@ export function BookingDeskClient({
 
                                 {isFocused &&
                                   !entry.memberId &&
-                                  paxMemberResults.length > 0 && (
+                                  visiblePaxMemberResults.length > 0 && (
                                     <div className="absolute z-30 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                                      {paxMemberResults.map((m) => (
+                                      {visiblePaxMemberResults.map((m) => (
                                         <button
                                           key={m.id}
                                           type="button"
@@ -1096,13 +1109,12 @@ export function BookingDeskClient({
                                             </div>
                                           </div>
                                           <span
-                                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                                              m.subsStatus === 'active'
-                                                ? 'bg-emerald-100 text-emerald-800'
-                                                : m.subsStatus === 'arrears'
-                                                  ? 'bg-amber-100 text-amber-800'
-                                                  : 'bg-rose-100 text-rose-800'
-                                            }`}
+                                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
+                                              ? 'bg-emerald-100 text-emerald-800'
+                                              : m.subsStatus === 'arrears'
+                                                ? 'bg-amber-100 text-amber-800'
+                                                : 'bg-rose-100 text-rose-800'
+                                              }`}
                                           >
                                             {m.subsStatus}
                                           </span>
@@ -1122,7 +1134,7 @@ export function BookingDeskClient({
             </div>
 
             {/* 2. Smart Table Allocation (Optional at booking time) */}
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="ticket-perforation pt-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900">
                   <Users className="h-4 w-4 text-sky-600" />
@@ -1151,24 +1163,22 @@ export function BookingDeskClient({
                       type="button"
                       disabled={t.isReserved}
                       onClick={() => toggleTableSelection(t.tableLabel)}
-                      className={`flex flex-col items-start justify-between rounded-lg border p-3 text-left text-xs transition ${
-                        t.isReserved
-                          ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-                          : isSelected
-                            ? 'border-sky-600 bg-sky-50 text-slate-900 ring-1 ring-sky-600'
-                            : 'border-slate-200 bg-white text-slate-800 hover:border-sky-400'
-                      }`}
+                      className={`flex flex-col items-start justify-between rounded-lg border p-3 text-left text-xs transition ${t.isReserved
+                        ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                        : isSelected
+                          ? 'border-sky-600 bg-sky-50 text-slate-900 ring-1 ring-sky-600'
+                          : 'border-slate-200 bg-white text-slate-800 hover:border-sky-400'
+                        }`}
                     >
                       <div className="flex w-full items-center justify-between">
                         <span className="text-sm font-bold">{t.tableLabel}</span>
                         <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                            t.isReserved
-                              ? 'bg-slate-200 text-slate-500'
-                              : isSelected
-                                ? 'bg-sky-600 text-white'
-                                : 'bg-slate-100 text-slate-700'
-                          }`}
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${t.isReserved
+                            ? 'bg-slate-200 text-slate-500'
+                            : isSelected
+                              ? 'bg-sky-600 text-white'
+                              : 'bg-slate-100 text-slate-700'
+                            }`}
                         >
                           {t.maxCapacity} seats
                         </span>
@@ -1194,7 +1204,7 @@ export function BookingDeskClient({
 
           {/* Right Column: Payment & Instant Summary */}
           <div className="space-y-4">
-            <div className="sticky top-20 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="sticky top-20 rounded-3xl bg-slate-50/90 p-5">
               <h2 className="text-sm font-bold text-slate-900">Booking Summary &amp; Payment</h2>
 
               <div className="mt-4 space-y-2 border-b border-slate-100 pb-4 text-xs">
@@ -1226,10 +1236,10 @@ export function BookingDeskClient({
                     onChange={(e) =>
                       setPaymentMode(
                         e.target.value as
-                          | 'CASH'
-                          | 'OFFICER_UPI'
-                          | 'COMPLIMENTARY'
-                          | 'PAY_AT_DOOR',
+                        | 'CASH'
+                        | 'OFFICER_UPI'
+                        | 'COMPLIMENTARY'
+                        | 'PAY_AT_DOOR',
                       )
                     }
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800"
@@ -1296,29 +1306,28 @@ export function BookingDeskClient({
             />
           </div>
 
-          <div className="space-y-3">
+          <div className="divide-y divide-dashed divide-slate-200">
             {filteredRecent.map((b) => (
               <div
                 key={b.id}
-                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                className="py-5 first:pt-2"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-base font-bold text-slate-900">
+                      <span className="text-sm font-bold text-slate-900">
                         {b.bookingCode}
                       </span>
                       <span className="text-sm font-semibold text-slate-700">
                         {b.holderName}
                       </span>
                       <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                          b.status === 'confirmed'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : b.status === 'transferred'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-rose-100 text-rose-800'
-                        }`}
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${b.status === 'confirmed'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : b.status === 'transferred'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-rose-100 text-rose-800'
+                          }`}
                       >
                         {b.status}
                       </span>
@@ -1341,13 +1350,13 @@ export function BookingDeskClient({
                       >
                         Assign / Edit Tables
                       </button>
-                      <button
+                      {/* <button
                         type="button"
                         onClick={() => handleTransferBooking(b)}
                         className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
                       >
                         Transfer
-                      </button>
+                      </button> */}
                       <button
                         type="button"
                         onClick={() => handleCancelBooking(b.id)}
@@ -1361,7 +1370,7 @@ export function BookingDeskClient({
 
                 {/* Physical Ticket Stubs */}
                 {b.tickets.length > 0 && (
-                  <div className="mt-3 border-t border-slate-100 pt-3">
+                  <div className="pt-3">
                     <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Ticket Stubs
                     </div>
@@ -1369,32 +1378,35 @@ export function BookingDeskClient({
                       {b.tickets.map((t) => (
                         <div
                           key={t.id}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                          className="flex flex-col items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden"
                         >
-                          <div className="min-w-0">
+                          <div className="flex flex-col w-full p-3">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-900">{t.ticketCode}</span>
+                              <span className="text-sm font-bold text-slate-900">{t.ticketCode}</span>
                               {t.ticketTypeName && (
-                                <span className="rounded bg-slate-200/70 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
-                                  {t.ticketTypeName} · {t.paxCount}p
+                                <span className="rounded bg-slate-200/70 px-1.5 py-0.5 text-sm font-semibold text-slate-700">
+                                  {t.ticketTypeName} · {t.paxCount} PAX
                                 </span>
                               )}
                             </div>
-                            <div className="mt-0.5 truncate text-[11px] font-medium text-slate-600">
-                              {t.paxNames && t.paxNames.length > 0
-                                ? t.paxNames.join(', ')
-                                : b.holderName}
+                            <div className="mt-0.5 truncate text-sm font-medium text-slate-600">
+                              <div className='flex flex-col'>
+                                {t.paxNames && t.paxNames.length > 0
+                                  ? t.paxNames.map((name, i) => (
+                                    <span key={i}>{name}</span>
+                                  ))
+                                  : b.holderName}
+                              </div>
                             </div>
                           </div>
                           <button
                             type="button"
                             disabled={!canCreate}
                             onClick={() => handleTogglePhysical(b.id, t.id, t.physicalIssued)}
-                            className={`inline-flex shrink-0 items-center gap-1 rounded px-2.5 py-1 text-[11px] font-semibold ${
-                              t.physicalIssued
-                                ? 'bg-emerald-600 text-white'
-                                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
-                            }`}
+                            className={`w-full border-0 inline-flex items-center gap-1 px-2.5 py-2 text-[11px] font-semibold ${t.physicalIssued
+                              ? 'bg-emerald-600 text-white'
+                              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                              }`}
                           >
                             <Printer className="h-3 w-3" />
                             {t.physicalIssued ? 'Issued' : 'Mark Issued'}
@@ -1410,54 +1422,70 @@ export function BookingDeskClient({
         </div>
       )}
 
-      {/* POST-BOOKING RECEIPT & MASTER QR MODAL */}
+      {/* POST-BOOKING RECEIPT & MASTER QR MODAL (Dark Frosted Glass Ticket Pass) */}
       {receipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+          <div className="glass-surface w-full max-w-sm overflow-hidden rounded-3xl p-6 text-white shadow-2xl">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-emerald-700">
-                <CheckCircle2 className="h-5 w-5" />
-                <span className="text-sm font-bold">Booking Confirmed!</span>
+              <div className="flex items-center gap-2 text-emerald-300">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  Master QR Pass
+                </span>
               </div>
-              <button type="button" onClick={() => setReceipt(null)}>
-                <X className="h-4 w-4 text-slate-400" />
+              <button
+                type="button"
+                onClick={() => setReceipt(null)}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+              >
+                <X className="h-4 w-4" />
               </button>
             </div>
 
             <div className="mt-4 text-center">
-              <div className="text-2xl font-extrabold text-slate-900">
-                {receipt.bookingCode}
+              <div className="text-xl font-extrabold tracking-tight text-white">
+                {events.find((e) => e.id === selectedEventId)?.name || receipt.holderName}
               </div>
-              <div className="text-sm font-medium text-slate-700">
-                {receipt.holderName} · {receipt.totalPax} Pax · ₹
-                {receipt.totalAmount.toLocaleString('en-IN')}
+              <div className="mt-1 text-xs text-slate-300/80">
+                Show this QR code at the event entrance
               </div>
-              <div className="mt-1 text-xs text-slate-500">
-                Tables: {receipt.tablesSummary}
+              <div className="mt-1 text-xs font-semibold text-slate-200">
+                Ticket: {receipt.bookingCode} · {receipt.holderName} ({receipt.totalPax} Pax)
               </div>
 
-              <div className="my-4 flex justify-center">
+              <div className="my-5 flex justify-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`/api/qr/${encodeURIComponent(receipt.bookingCode)}`}
+                  src={`/api/qr/${encodeURIComponent(receipt.bookingCode)}?style=qr&v=2`}
                   alt="Master QR"
-                  className="h-52 w-52 rounded-xl border border-slate-200 p-2"
+                  className="h-56 w-56"
                 />
               </div>
 
-              <div className="space-y-1 rounded-lg bg-slate-50 p-2.5 text-left text-xs text-slate-700">
-                <div>
-                  <strong>Ticket Codes:</strong>{' '}
-                  {receipt.tickets.map((t) => t.ticketCode).join(', ')}
-                </div>
-                {receipt.tickets.map((t) => (
-                  <div key={t.id} className="text-[11px] text-slate-600">
-                    <strong>{t.ticketCode}:</strong>{' '}
-                    {t.paxNames && t.paxNames.length > 0
-                      ? t.paxNames.join(', ')
-                      : `${t.paxCount} pax`}
+              {/* White Inset Info Card (Inspired by Reference Ticket Pass) */}
+              <div className="rounded-2xl bg-white p-3.5 text-left text-xs text-slate-800 shadow-sm">
+                <div className="flex items-center justify-between border-b border-dashed border-slate-200 pb-2">
+                  <div>
+                    <div className="text-[10px] font-medium text-slate-400">Tables</div>
+                    <div className="font-bold text-slate-900">{receipt.tablesSummary}</div>
                   </div>
-                ))}
+                  <div className="text-right">
+                    <div className="text-[10px] font-medium text-slate-400">Total</div>
+                    <div className="font-extrabold text-emerald-700">
+                      ₹{receipt.totalAmount.toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2 space-y-1">
+                  {receipt.tickets.map((t) => (
+                    <div key={t.id} className="text-[11px] text-slate-600">
+                      <strong className="text-slate-900">{t.ticketCode}:</strong>{' '}
+                      {t.paxNames && t.paxNames.length > 0
+                        ? t.paxNames.join(', ')
+                        : `${t.paxCount} pax`}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1471,17 +1499,17 @@ export function BookingDeskClient({
                   })
                   window.alert('WhatsApp & Email pass resend triggered!')
                 }}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-white/10 px-3 py-2.5 text-xs font-semibold text-white backdrop-blur-md hover:bg-white/20"
               >
                 <Send className="h-3.5 w-3.5" />
-                Resend WhatsApp / Email
+                Resend
               </button>
               <button
                 type="button"
                 onClick={() => setReceipt(null)}
-                className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                className="flex-1 rounded-2xl bg-white px-3 py-2.5 text-xs font-bold text-slate-950 hover:bg-slate-100"
               >
-                Done / Next Booking
+                Done
               </button>
             </div>
           </div>
@@ -1512,13 +1540,12 @@ export function BookingDeskClient({
                     type="button"
                     disabled={reservedByOther}
                     onClick={() => toggleEditTableSelection(t.tableLabel)}
-                    className={`flex flex-col items-start justify-between rounded-lg border p-2.5 text-left text-xs transition ${
-                      reservedByOther
-                        ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-                        : isSelected
-                          ? 'border-sky-600 bg-sky-50 text-slate-900 ring-1 ring-sky-600'
-                          : 'border-slate-200 bg-white text-slate-800 hover:border-sky-400'
-                    }`}
+                    className={`flex flex-col items-start justify-between rounded-lg border p-2.5 text-left text-xs transition ${reservedByOther
+                      ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                      : isSelected
+                        ? 'border-sky-600 bg-sky-50 text-slate-900 ring-1 ring-sky-600'
+                        : 'border-slate-200 bg-white text-slate-800 hover:border-sky-400'
+                      }`}
                   >
                     <div className="flex w-full items-center justify-between">
                       <span className="font-bold">{t.tableLabel}</span>

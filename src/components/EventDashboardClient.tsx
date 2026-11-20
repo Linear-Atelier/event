@@ -208,11 +208,11 @@ export function EventDashboardClient({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center">
+      {/* Clean White Borderless Header */}
+      <div className="flex flex-col justify-between gap-4 border-b border-dashed border-slate-200 pb-5 sm:flex-row sm:items-center">
         <div>
           <div className="flex items-center gap-2">
-            <span className="rounded bg-sky-100 px-2 py-0.5 text-xs font-bold text-sky-800">
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-800">
               {event.code}
             </span>
             <span className="text-xs text-slate-500">
@@ -222,31 +222,33 @@ export function EventDashboardClient({
               })}
             </span>
           </div>
-          <h1 className="mt-1.5 text-2xl font-bold text-slate-900">{event.name}</h1>
-          <p className="text-sm text-slate-600">{event.venue}</p>
+          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-950">
+            {event.name}
+          </h1>
+          <p className="text-sm text-slate-500">{event.venue}</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Link
             href={`/desk?eventId=${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-sky-700"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-sky-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-sky-700"
           >
             <Ticket className="h-4 w-4" />
             New Booking
           </Link>
           <Link
             href={`/finance?eventId=${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-200"
           >
             <CreditCard className="h-4 w-4" />
-            Finance Queue
+            Finance
           </Link>
           <Link
             href={`/scan?eventId=${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-slate-950 px-4 py-2 text-xs font-bold text-white transition hover:bg-slate-800"
           >
             <QrCode className="h-4 w-4" />
-            Gate Scanner
+            Gate Scan
           </Link>
         </div>
       </div>
@@ -260,8 +262,8 @@ export function EventDashboardClient({
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+      {/* Soft Pill Tabs (White App Style) */}
+      <div className="flex gap-1 overflow-x-auto rounded-2xl bg-slate-100/90 p-1">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const active = activeTab === tab.key
@@ -270,13 +272,13 @@ export function EventDashboardClient({
               key={tab.key}
               type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-xs font-semibold transition ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition ${
                 active
-                  ? 'border-sky-600 text-sky-700'
-                  : 'border-transparent text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-slate-950 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-900'
               }`}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-3.5 w-3.5" />
               {tab.label}
             </button>
           )
@@ -286,46 +288,54 @@ export function EventDashboardClient({
       {/* OVERVIEW TAB */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-xs font-medium text-slate-500">Confirmed Bookings</div>
-              <div className="mt-1 text-2xl font-bold text-slate-900">
+          <div className="glass-surface grid gap-5 rounded-3xl p-5 text-white shadow-xl sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Confirmed Bookings
+              </div>
+              <div className="mt-1 text-2xl font-extrabold text-white">
                 {activeBookings.length}
               </div>
-              <div className="mt-1 text-xs text-slate-500">
+              <div className="mt-1 text-xs text-slate-400">
                 {totalPax} total guests (pax)
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-xs font-medium text-slate-500">Live Gate Attendance</div>
-              <div className="mt-1 text-2xl font-bold text-sky-700">
+            <div className="sm:border-l sm:border-white/10 sm:pl-5">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
+                Live Gate Attendance
+              </div>
+              <div className="mt-1 text-2xl font-extrabold text-sky-300">
                 {checkedInSlots} / {totalSlots}
               </div>
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="h-full rounded-full bg-sky-500 transition-all"
+                  className="h-full rounded-full bg-sky-400 transition-all"
                   style={{ width: `${attendancePct}%` }}
                 />
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-xs font-medium text-slate-500">Gross Revenue</div>
-              <div className="mt-1 text-2xl font-bold text-emerald-700">
+            <div className="lg:border-l lg:border-white/10 lg:pl-5">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
+                Gross Revenue
+              </div>
+              <div className="mt-1 text-2xl font-extrabold text-emerald-300">
                 ₹{totalRevenue.toLocaleString('en-IN')}
               </div>
-              <div className="mt-1 text-xs text-slate-500">
-                ₹{verifiedRevenue.toLocaleString('en-IN')} treasurer verified
+              <div className="mt-1 text-xs text-slate-400">
+                ₹{verifiedRevenue.toLocaleString('en-IN')} received by treasurer
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-xs font-medium text-slate-500">Table Utilization</div>
-              <div className="mt-1 text-2xl font-bold text-slate-900">
+            <div className="sm:border-l sm:border-white/10 sm:pl-5">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Table Utilization
+              </div>
+              <div className="mt-1 text-2xl font-extrabold text-white">
                 {totalSeatsAllocated} / {totalTableCapacity}
               </div>
-              <div className="mt-1 text-xs text-slate-500">
+              <div className="mt-1 text-xs text-slate-400">
                 across {tables.length} tables
               </div>
             </div>
@@ -379,9 +389,9 @@ export function EventDashboardClient({
             </select>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-              <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              <thead className="border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 <tr>
                   <th className="px-4 py-3">Booking</th>
                   <th className="px-4 py-3">Holder</th>
@@ -495,8 +505,8 @@ export function EventDashboardClient({
             return (
               <div
                 key={t.id}
-                className={`rounded-xl border bg-white p-4 shadow-sm ${
-                  isFull ? 'border-emerald-300' : 'border-slate-200'
+                className={`rounded-2xl p-4 ${
+                  isFull ? 'bg-emerald-50/60 ring-1 ring-emerald-200/80' : 'bg-slate-50/80'
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -548,27 +558,27 @@ export function EventDashboardClient({
       {/* TREASURER SUMMARY TAB */}
       {activeTab === 'treasurer' && (
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-8 md:grid-cols-2">
+            <div>
               <h3 className="text-sm font-bold text-slate-900">By Payment Mode</h3>
               <table className="mt-3 w-full text-left text-xs">
-                <thead className="border-b border-slate-200 text-slate-500">
+                <thead className="border-b border-slate-200 text-slate-400">
                   <tr>
                     <th className="py-2">Mode</th>
                     <th className="py-2">Bookings</th>
                     <th className="py-2">Total</th>
-                    <th className="py-2">Verified</th>
+                    <th className="py-2">Received</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {modeSummary.map((m) => (
                     <tr key={m.paymentMode}>
-                      <td className="py-2 font-semibold">{m.paymentMode}</td>
-                      <td className="py-2">{m.bookingCount}</td>
-                      <td className="py-2 font-medium">
+                      <td className="py-2.5 font-semibold">{m.paymentMode}</td>
+                      <td className="py-2.5">{m.bookingCount}</td>
+                      <td className="py-2.5 font-medium">
                         ₹{Number(m.totalAmount).toLocaleString('en-IN')}
                       </td>
-                      <td className="py-2 text-emerald-700">
+                      <td className="py-2.5 text-emerald-700">
                         ₹{Number(m.verifiedAmount).toLocaleString('en-IN')}
                       </td>
                     </tr>
@@ -577,28 +587,28 @@ export function EventDashboardClient({
               </table>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="ticket-perforation pt-6 md:border-t-0 md:pt-0">
               <h3 className="text-sm font-bold text-slate-900">Officer Cash Reconciliation</h3>
               <table className="mt-3 w-full text-left text-xs">
-                <thead className="border-b border-slate-200 text-slate-500">
+                <thead className="border-b border-slate-200 text-slate-400">
                   <tr>
                     <th className="py-2">Officer</th>
                     <th className="py-2">Cash</th>
                     <th className="py-2">UPI</th>
                     <th className="py-2">Total</th>
-                    <th className="py-2">Unverified</th>
+                    <th className="py-2">Pending</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {officerSummary.map((o, idx) => (
                     <tr key={idx}>
-                      <td className="py-2 font-semibold">{o.officerName}</td>
-                      <td className="py-2">₹{Number(o.cashAmount).toLocaleString('en-IN')}</td>
-                      <td className="py-2">₹{Number(o.upiAmount).toLocaleString('en-IN')}</td>
-                      <td className="py-2 font-bold">
+                      <td className="py-2.5 font-semibold">{o.officerName}</td>
+                      <td className="py-2.5">₹{Number(o.cashAmount).toLocaleString('en-IN')}</td>
+                      <td className="py-2.5">₹{Number(o.upiAmount).toLocaleString('en-IN')}</td>
+                      <td className="py-2.5 font-bold">
                         ₹{Number(o.totalAmount).toLocaleString('en-IN')}
                       </td>
-                      <td className="py-2 text-amber-700">{o.unverifiedCount}</td>
+                      <td className="py-2.5 text-amber-700">{o.unverifiedCount}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -610,10 +620,10 @@ export function EventDashboardClient({
 
       {/* LIVE ATTENDANCE TAB */}
       {activeTab === 'attendance' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="space-y-5">
+          <div className="flex items-center justify-between border-b border-dashed border-slate-200 pb-4">
             <div>
-              <div className="text-sm font-bold text-slate-900">
+              <div className="text-base font-bold text-slate-950">
                 {checkedInSlots} of {totalSlots} guests checked in ({attendancePct}%)
               </div>
               <div className="text-xs text-slate-500">
@@ -623,16 +633,16 @@ export function EventDashboardClient({
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-200"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Refresh
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-              <thead className="bg-slate-50 text-[11px] font-semibold uppercase text-slate-500">
+              <thead className="border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-400">
                 <tr>
                   <th className="px-4 py-3">Time</th>
                   <th className="px-4 py-3">Booking</th>
@@ -677,43 +687,65 @@ export function EventDashboardClient({
         </div>
       )}
 
-      {/* QR PREVIEW MODAL */}
+      {/* QR PREVIEW MODAL (Dark Frosted Glass Ticket Pass) */}
       {qrModalBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+          <div className="glass-surface w-full max-w-sm rounded-3xl p-6 text-center text-white shadow-2xl">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-sky-700">
-                Master QR Pass
+              <span className="text-[11px] font-bold uppercase tracking-widest text-sky-300">
+                Scan QR Code
               </span>
               <button
                 type="button"
                 onClick={() => setQrModalBooking(null)}
-                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <h3 className="mt-2 text-lg font-bold text-slate-900">
-              {qrModalBooking.bookingCode} · {qrModalBooking.holderName}
-            </h3>
-            <p className="text-xs text-slate-500">
-              {qrModalBooking.totalPax} Pax · {qrModalBooking.tablesSummary}
-            </p>
+            <div className="mt-3 text-center">
+              <h3 className="text-xl font-extrabold tracking-tight text-white">
+                {event.name}
+              </h3>
+              <p className="mt-1 text-xs text-slate-300/80">
+                Show this QR code at the event entrance
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-200">
+                Ticket: {qrModalBooking.bookingCode} · {qrModalBooking.holderName} ({qrModalBooking.totalPax} Pax)
+              </p>
+            </div>
 
-            <div className="my-4 flex justify-center">
+            <div className="my-5 flex justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`/api/qr/${encodeURIComponent(qrModalBooking.bookingCode)}`}
+                src={`/api/qr/${encodeURIComponent(qrModalBooking.bookingCode)}?style=qr&v=2`}
                 alt={`QR ${qrModalBooking.bookingCode}`}
-                className="h-56 w-56 rounded-xl border border-slate-200 p-2"
+                className="h-56 w-56"
               />
             </div>
 
-            <div className="text-[11px] text-slate-500">
-              Tickets: {qrModalBooking.ticketCodes.join(', ')}
+            <div className="mt-4 rounded-2xl bg-white p-3.5 text-left text-xs text-slate-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] text-slate-400">Seat / Table Info</div>
+                  <div className="font-bold text-slate-900">
+                    {qrModalBooking.tablesSummary}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-slate-400">Amount</div>
+                  <div className="font-bold text-emerald-700">
+                    ₹{qrModalBooking.totalAmount.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 border-t border-dashed border-slate-200 pt-2 text-[11px] text-slate-500">
+                Tickets: {qrModalBooking.ticketCodes.join(', ')}
+              </div>
             </div>
-            <div className="mt-1 text-[10px] text-slate-400">
+
+            <div className="mt-3 text-[10px] text-slate-400">
               Linear Atelier · Ticketing Partner
             </div>
           </div>

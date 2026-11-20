@@ -1,16 +1,25 @@
 import { NextResponse } from 'next/server'
 import { getPayload } from 'payload'
 import config from '@payload-config'
-import QRCode from 'qrcode'
 import { buildSignedQRJson } from '@/lib/crypto'
+import { generateStyledQrPng } from '@/lib/qr-image'
+import type { Event } from '@/payload-types'
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ bookingCode: string }> },
 ) {
   try {
     const { bookingCode } = await context.params
     const cleanCode = decodeURIComponent(bookingCode).replace(/\.png$/i, '').trim()
+    const url = new URL(request.url)
+    const styleParam = url.searchParams.get('style')
+    const style =
+      styleParam === 'qr'
+        ? 'qr'
+        : styleParam === 'card'
+          ? 'card'
+          : 'square'
 
     const payload = await getPayload({ config })
     const res = await payload.find({
@@ -18,7 +27,7 @@ export async function GET(
       overrideAccess: true,
       where: { bookingCode: { equals: cleanCode } },
       limit: 1,
-      depth: 0,
+      depth: 1,
     })
 
     const booking = res.docs[0]
@@ -26,7 +35,13 @@ export async function GET(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 
-    const eventId = typeof booking.event === 'object' ? booking.event.id : booking.event
+    const eventObj =
+      typeof booking.event === 'object' && booking.event !== null
+        ? (booking.event as Event)
+        : null
+    const eventId = eventObj ? eventObj.id : (booking.event as number)
+    const eventName = eventObj?.name || 'AIAIA Cochin Event'
+
     const qrContent = buildSignedQRJson({
       bId: booking.id,
       code: booking.bookingCode,
@@ -35,22 +50,18 @@ export async function GET(
       sig: booking.qrSignature || '',
     })
 
-    const pngBuffer = await QRCode.toBuffer(qrContent, {
-      type: 'png',
-      width: 480,
-      margin: 2,
-      errorCorrectionLevel: 'M',
-      color: {
-        dark: '#0f172a',
-        light: '#ffffff',
-      },
+    const pngBuffer = await generateStyledQrPng({
+      qrContent,
+      eventName,
+      bookingCode: booking.bookingCode,
+      style,
     })
 
     return new NextResponse(new Uint8Array(pngBuffer), {
       status: 200,
       headers: {
         'Content-Type': 'image/png',
-        'Cache-Control': 'public, max-age=300',
+        'Cache-Control': 'public, max-age=60, must-revalidate',
       },
     })
   } catch {

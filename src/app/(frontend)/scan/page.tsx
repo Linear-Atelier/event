@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import { getServerUser, userHasRole } from '@/lib/auth'
-import { AppNavbar, PageFooter } from '@/components/AppNavbar'
 import { GateScannerClient } from '@/components/GateScannerClient'
 
 export const dynamic = 'force-dynamic'
@@ -30,22 +29,18 @@ export default async function GateScanPage(props: {
   const canScan = userHasRole(user, ['gate_staff', 'booking_officer', 'super_admin'])
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <AppNavbar user={user} />
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
-        <GateScannerClient
-          events={eventsRes.docs.map((e) => ({
-            id: e.id,
-            code: e.code,
-            name: e.name,
-            date: e.date,
-            venue: e.venue,
-          }))}
-          initialEventId={initialEventId}
-          canScan={canScan}
-        />
-      </main>
-      <PageFooter />
-    </div>
+    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+      <GateScannerClient
+        events={eventsRes.docs.map((e) => ({
+          id: e.id,
+          code: e.code,
+          name: e.name,
+          date: e.date,
+          venue: e.venue,
+        }))}
+        initialEventId={initialEventId}
+        canScan={canScan}
+      />
+    </main>
   )
 }

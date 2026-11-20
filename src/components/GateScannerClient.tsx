@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import jsQR from 'jsqr'
 import {
   Camera,
@@ -67,8 +67,23 @@ export function GateScannerClient({
   const [selectedEventId, setSelectedEventId] = useState<number>(
     initialEventId || events[0]?.id || 0,
   )
-  const [isOnline, setIsOnline] = useState<boolean>(true)
-  const [deviceId, setDeviceId] = useState<string>('GATE-LOCAL')
+  const isOnline = useSyncExternalStore(
+    (onStoreChange) => {
+      window.addEventListener('online', onStoreChange)
+      window.addEventListener('offline', onStoreChange)
+      return () => {
+        window.removeEventListener('online', onStoreChange)
+        window.removeEventListener('offline', onStoreChange)
+      }
+    },
+    () => navigator.onLine,
+    () => true,
+  )
+  const deviceId = useSyncExternalStore(
+    () => () => {},
+    () => getOrCreateDeviceId(),
+    () => 'GATE-LOCAL',
+  )
   const [cachedEvent, setCachedEvent] = useState<CachedEvent | null>(null)
   const [cachedBookingCount, setCachedBookingCount] = useState(0)
   const [pendingSyncCount, setPendingSyncCount] = useState(0)
@@ -107,22 +122,10 @@ export function GateScannerClient({
   const [doorSubmitting, setDoorSubmitting] = useState(false)
   const [doorSuccess, setDoorSuccess] = useState<string | null>(null)
 
-  // Register Service Worker & online/offline listeners
+  // Register Service Worker
   useEffect(() => {
-    setDeviceId(getOrCreateDeviceId())
-    setIsOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
-
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {})
-    }
-
-    const onOnline = () => setIsOnline(true)
-    const onOffline = () => setIsOnline(false)
-    window.addEventListener('online', onOnline)
-    window.addEventListener('offline', onOffline)
-    return () => {
-      window.removeEventListener('online', onOnline)
-      window.removeEventListener('offline', onOffline)
     }
   }, [])
 
@@ -139,8 +142,23 @@ export function GateScannerClient({
   }, [])
 
   useEffect(() => {
-    refreshLocalStats(selectedEventId)
-  }, [selectedEventId, refreshLocalStats])
+    if (!selectedEventId) return
+    let cancelled = false
+    void (async () => {
+      const [ev, bCount, pCount] = await Promise.all([
+        offlineDb.events.get(selectedEventId),
+        offlineDb.bookings.where('eventId').equals(selectedEventId).count(),
+        offlineDb.pendingSync.where('synced').equals(0).count(),
+      ])
+      if (cancelled) return
+      setCachedEvent(ev || null)
+      setCachedBookingCount(bCount)
+      setPendingSyncCount(pCount)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedEventId])
 
   // Load door-sale ticket phases when online
   useEffect(() => {
@@ -154,7 +172,7 @@ export function GateScannerClient({
         )
         setDoorPhases(allActive)
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [selectedEventId, isOnline])
 
   // Download full event roster to Dexie IndexedDB
@@ -242,9 +260,11 @@ export function GateScannerClient({
 
   // Auto-sync when coming back online
   useEffect(() => {
-    if (isOnline && pendingSyncCount > 0) {
-      handleSyncPending()
-    }
+    if (!isOnline || pendingSyncCount === 0) return
+    const timer = setTimeout(() => {
+      void handleSyncPending()
+    }, 0)
+    return () => clearTimeout(timer)
   }, [isOnline, pendingSyncCount, handleSyncPending])
 
   // Open pre-ticked checklist for a booking, grouping couples / multi-pax tickets together
@@ -375,7 +395,7 @@ export function GateScannerClient({
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream
-          videoRef.current.play().catch(() => {})
+          videoRef.current.play().catch(() => { })
         }
 
         const tick = () => {
@@ -412,11 +432,10 @@ export function GateScannerClient({
   // Offline manual search by B042, B042-T01, phone, or holderName
   useEffect(() => {
     const q = lookupQuery.trim().toLowerCase()
-    if (!q) {
-      setLookupResults([])
-      return
-    }
-    ;(async () => {
+    if (!q) return
+
+    let cancelled = false
+    ; (async () => {
       const allBookings = await offlineDb.bookings
         .where('eventId')
         .equals(selectedEventId)
@@ -435,6 +454,8 @@ export function GateScannerClient({
           )
           .toArray(),
       ])
+      if (cancelled) return
+
       const ticketBookingIds = new Set(matchingTickets.map((t) => t.bookingId))
       const slotBookingIds = new Set(matchingSlots.map((s) => s.bookingId))
 
@@ -448,7 +469,13 @@ export function GateScannerClient({
       )
       setLookupResults(matched.slice(0, 15))
     })()
+
+    return () => {
+      cancelled = true
+    }
   }, [lookupQuery, selectedEventId])
+
+  const visibleLookupResults = lookupQuery.trim() ? lookupResults : []
 
   // Confirm pre-ticked check-in slots (locks permanently!)
   async function handleConfirmCheckin() {
@@ -571,8 +598,8 @@ export function GateScannerClient({
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
-      {/* Top Status Bar */}
-      <div className="rounded-xl border border-slate-200 bg-slate-900 p-4 text-white shadow-md">
+      {/* Top Frosted Glass Scanner Hero */}
+      <div className="glass-surface rounded-3xl p-5 text-white shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -581,9 +608,8 @@ export function GateScannerClient({
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-300">
               <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
-                  isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-                }`}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                  }`}
               >
                 {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
                 {isOnline ? 'Online' : 'Offline Dead-Zone Mode'}
@@ -634,11 +660,10 @@ export function GateScannerClient({
               type="button"
               disabled={syncing || pendingSyncCount === 0 || !isOnline}
               onClick={handleSyncPending}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold ${
-                pendingSyncCount > 0
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold ${pendingSyncCount > 0
                   ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
                   : 'bg-slate-800 text-slate-400'
-              } disabled:opacity-50`}
+                } disabled:opacity-50`}
             >
               <CloudUpload className="h-3.5 w-3.5" />
               {syncing ? 'Syncing…' : `Sync (${pendingSyncCount})`}
@@ -656,14 +681,15 @@ export function GateScannerClient({
         </div>
       )}
 
-      {/* Mode Switch: Check-In vs Door Sales */}
-      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+      {/* Mode Switch: Check-In vs Door Sales (White App Pill Switcher) */}
+      <div className="grid grid-cols-2 rounded-2xl bg-slate-100/90 p-1">
         <button
           type="button"
           onClick={() => setTab('scan')}
-          className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-bold transition ${
-            tab === 'scan' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
-          }`}
+          className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold transition ${tab === 'scan'
+              ? 'bg-white text-slate-950 shadow-xs'
+              : 'text-slate-500 hover:text-slate-900'
+            }`}
         >
           <QrCode className="h-4 w-4" />
           QR Scan &amp; Lookup
@@ -674,9 +700,10 @@ export function GateScannerClient({
             stopCamera()
             setTab('door')
           }}
-          className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-bold transition ${
-            tab === 'door' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
-          }`}
+          className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold transition ${tab === 'door'
+              ? 'bg-white text-slate-950 shadow-xs'
+              : 'text-slate-500 hover:text-slate-900'
+            }`}
         >
           <UserPlus className="h-4 w-4" />
           Door Sales / Walk-In
@@ -684,19 +711,20 @@ export function GateScannerClient({
       </div>
 
       {tab === 'scan' ? (
-        <div className="space-y-4">
-          {/* Camera QR Scanner */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="space-y-6">
+          {/* Camera QR Scanner (Frosted Glass Accent) */}
+          <div className="glass-surface rounded-3xl p-4 text-white shadow-xl">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-slate-900">Master QR Camera Scanner</h2>
+              <div>
+                <h2 className="text-sm font-bold text-white">Master QR Camera Scanner</h2>
+              </div>
               <button
                 type="button"
                 onClick={cameraActive ? stopCamera : startCamera}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                  cameraActive
-                    ? 'bg-rose-600 text-white hover:bg-rose-700'
-                    : 'bg-sky-600 text-white hover:bg-sky-700'
-                }`}
+                className={`inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2 text-xs font-bold transition ${cameraActive
+                    ? 'bg-rose-500 text-white hover:bg-rose-600'
+                    : 'bg-white text-slate-950 hover:bg-slate-100'
+                  }`}
               >
                 {cameraActive ? (
                   <>
@@ -711,11 +739,11 @@ export function GateScannerClient({
             </div>
 
             {cameraError && (
-              <p className="mt-2 text-xs text-rose-600">{cameraError}</p>
+              <p className="mt-2 text-xs text-rose-300">{cameraError}</p>
             )}
 
             {cameraActive && (
-              <div className="relative mt-3 overflow-hidden rounded-xl bg-black">
+              <div className="relative mt-4 overflow-hidden rounded-2xl border border-white/15 bg-black">
                 <video
                   ref={videoRef}
                   playsInline
@@ -730,10 +758,10 @@ export function GateScannerClient({
             )}
           </div>
 
-          {/* Offline Manual Lookup */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          {/* Offline Manual Lookup (Borderless White Sheet) */}
+          <div className="ticket-perforation pt-5">
             <h2 className="text-sm font-bold text-slate-900">
-              Manual Lookup (Works 100% Offline)
+              Manual Lookup
             </h2>
             <div className="relative mt-2">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -742,18 +770,18 @@ export function GateScannerClient({
                 value={lookupQuery}
                 onChange={(e) => setLookupQuery(e.target.value)}
                 placeholder="Type B001, B001-T01, phone number, or guest name..."
-                className="w-full rounded-lg border border-slate-300 py-2.5 pl-9 pr-3 text-sm focus:border-sky-500 focus:outline-none"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm focus:border-sky-500 focus:bg-white focus:outline-none"
               />
             </div>
 
-            {lookupResults.length > 0 && (
-              <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {lookupResults.map((b) => (
+            {visibleLookupResults.length > 0 && (
+              <div className="mt-3 divide-y divide-dashed divide-slate-200">
+                {visibleLookupResults.map((b) => (
                   <button
                     key={b.id}
                     type="button"
                     onClick={() => openBookingChecklist(b, 'manual', 'manual_code')}
-                    className="flex w-full items-center justify-between px-3 py-3 text-left hover:bg-sky-50"
+                    className="flex w-full items-center justify-between px-1 py-3.5 text-left transition hover:bg-slate-50"
                   >
                     <div>
                       <div className="flex items-center gap-2">
@@ -766,7 +794,7 @@ export function GateScannerClient({
                         {b.phone} · {b.totalPax} Pax · Tables: {b.tablesSummary}
                       </div>
                     </div>
-                    <span className="rounded-md bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-800">
+                    <span className="rounded-xl bg-sky-100 px-3 py-1.5 text-xs font-bold text-sky-800">
                       Check In →
                     </span>
                   </button>
@@ -779,7 +807,7 @@ export function GateScannerClient({
         /* DOOR SALES / WALK-IN ENTRY */
         <form
           onSubmit={handleDoorSaleSubmit}
-          className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+          className="space-y-4 py-1"
         >
           <h2 className="text-sm font-bold text-slate-900">
             Fast Walk-In / Door Sales Entry (Auto Check-In)
@@ -1015,13 +1043,12 @@ export function GateScannerClient({
                       return (
                         <label
                           key={slot.id}
-                          className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-xs transition ${
-                            alreadyLocked
+                          className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-xs transition ${alreadyLocked
                               ? 'border-slate-200 bg-slate-100 text-slate-500'
                               : checked
                                 ? 'border-emerald-400 bg-emerald-50/80 text-slate-900'
                                 : 'border-slate-200 bg-white text-slate-700'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center gap-2.5">
                             <input

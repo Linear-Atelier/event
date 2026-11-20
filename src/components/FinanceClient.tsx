@@ -332,50 +332,56 @@ export function FinanceClient({
         </div>
       </div>
 
-      {/* 3-Stage Handover KPIs */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-xs font-medium text-slate-500">Gross Revenue</div>
-          <div className="mt-1 text-2xl font-bold text-slate-900">
-            ₹{totals.gross.toLocaleString('en-IN')}
+      {/* Dark Frosted Glass Handover Summary Banner */}
+      <div className="glass-surface rounded-3xl p-5 text-white shadow-xl">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div>
+            <div className="text-[11px] font-medium text-slate-300">Gross Revenue</div>
+            <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
+              ₹{totals.gross.toLocaleString('en-IN')}
+            </div>
+            <div className="mt-0.5 text-[11px] text-slate-400">
+              {totals.count} active bookings
+            </div>
           </div>
-          <div className="mt-1 text-xs text-slate-500">{totals.count} active bookings</div>
-        </div>
 
-        <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-5 shadow-sm">
-          <div className="text-xs font-medium text-amber-800">With Officers</div>
-          <div className="mt-1 text-2xl font-bold text-amber-900">
-            ₹{totals.withOfficer.toLocaleString('en-IN')}
+          <div>
+            <div className="text-[11px] font-medium text-amber-300">With Officers</div>
+            <div className="mt-1 text-2xl font-extrabold tracking-tight text-amber-300">
+              ₹{totals.withOfficer.toLocaleString('en-IN')}
+            </div>
+            <div className="mt-0.5 text-[11px] text-slate-300">
+              {totals.withOfficerCount} not yet transferred
+            </div>
           </div>
-          <div className="mt-1 text-xs text-amber-800">
-            {totals.withOfficerCount} booking(s) not yet transferred
-          </div>
-        </div>
 
-        <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-5 shadow-sm">
-          <div className="text-xs font-medium text-sky-800">Sent to Treasurer</div>
-          <div className="mt-1 text-2xl font-bold text-sky-900">
-            ₹{totals.transferred.toLocaleString('en-IN')}
+          <div>
+            <div className="text-[11px] font-medium text-sky-300">Sent to Treasurer</div>
+            <div className="mt-1 text-2xl font-extrabold tracking-tight text-sky-300">
+              ₹{totals.transferred.toLocaleString('en-IN')}
+            </div>
+            <div className="mt-0.5 text-[11px] text-slate-300">
+              {totals.transferredCount} awaiting receipt
+            </div>
           </div>
-          <div className="mt-1 text-xs text-sky-700">
-            {totals.transferredCount} booking(s) awaiting confirmation
-          </div>
-        </div>
 
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-5 shadow-sm">
-          <div className="text-xs font-medium text-emerald-700">Received by Treasurer</div>
-          <div className="mt-1 text-2xl font-bold text-emerald-800">
-            ₹{totals.received.toLocaleString('en-IN')}
-          </div>
-          <div className="mt-1 text-xs text-emerald-700">
-            {totals.receivedCount} booking(s) settled
+          <div>
+            <div className="text-[11px] font-medium text-emerald-300">
+              Received by Treasurer
+            </div>
+            <div className="mt-1 text-2xl font-extrabold tracking-tight text-emerald-300">
+              ₹{totals.received.toLocaleString('en-IN')}
+            </div>
+            <div className="mt-0.5 text-[11px] text-slate-300">
+              {totals.receivedCount} settled
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Officer Cash Reconciliation & Payment Modes */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
+      {/* Officer Cash Reconciliation & Payment Modes (Borderless White Sections) */}
+      <div className="grid gap-8 lg:grid-cols-3">
+        <div className="lg:col-span-2">
           <h2 className="text-sm font-bold text-slate-900">
             Officer-Wise Cash &amp; UPI Reconciliation
           </h2>
@@ -431,13 +437,13 @@ export function FinanceClient({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="ticket-perforation pt-6 lg:border-t-0 lg:pt-0">
           <h2 className="text-sm font-bold text-slate-900">Payment Mode Breakdown</h2>
           <div className="mt-3 space-y-2.5">
             {modeRows.map((m) => (
               <div
                 key={m.paymentMode}
-                className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs"
+                className="flex items-center justify-between rounded-2xl bg-slate-50/80 px-4 py-3 text-xs"
               >
                 <div>
                   <div className="font-bold text-slate-900">{m.paymentMode}</div>
@@ -460,14 +466,14 @@ export function FinanceClient({
       </div>
 
       {/* 2-Step Treasurer Handover Queue */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="ticket-perforation pt-6">
         <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <h2 className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
               <ArrowRightLeft className="h-4 w-4 text-sky-600" />
               Treasurer Transfer Queue
             </h2>
-            <div className="inline-flex flex-wrap rounded-lg border border-slate-200 p-0.5 text-xs">
+            <div className="inline-flex flex-wrap gap-1 rounded-2xl bg-slate-100/90 p-1 text-xs">
               {(
                 [
                   { key: 'with_officer', label: `With Officer (${totals.withOfficerCount})` },
@@ -486,10 +492,10 @@ export function FinanceClient({
                     setFilterStatus(tab.key)
                     setSelectedIds([])
                   }}
-                  className={`rounded-md px-2.5 py-1 font-medium ${
+                  className={`rounded-xl px-3 py-1.5 font-bold transition ${
                     filterStatus === tab.key
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-slate-950 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
                   }`}
                 >
                   {tab.label}
@@ -538,7 +544,7 @@ export function FinanceClient({
               <tr>
                 {canInteract && <th className="no-print w-8 px-3 py-2.5" />}
                 <th className="px-3 py-2.5">Code</th>
-                <th className="px-3 py-2.5">Holder</th>
+                <th className="px-3 py-2.5">Booking</th>
                 <th className="px-3 py-2.5">Pax</th>
                 <th className="px-3 py-2.5">Amount</th>
                 <th className="px-3 py-2.5">Collected By</th>

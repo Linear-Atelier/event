@@ -1,6 +1,15 @@
 import React from 'react'
 import type { Metadata, Viewport } from 'next'
+import { Nunito_Sans } from 'next/font/google'
+import { getServerUser } from '@/lib/auth'
+import { AppNavbar } from '@/components/AppNavbar'
 import './styles.css'
+
+const nunitoSans = Nunito_Sans({
+  subsets: ['latin'],
+  variable: '--font-nunito-sans',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'AIAIA Cochin Branch — Event Ticketing & Gate Management',
@@ -17,11 +26,19 @@ export const viewport: Viewport = {
 
 export default async function RootLayout(props: { children: React.ReactNode }) {
   const { children } = props
+  const user = await getServerUser()
 
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900">
-        {children}
+    <html lang="en" className={nunitoSans.variable}>
+      <body className="min-h-screen bg-white font-sans text-slate-900 antialiased">
+        {user ? (
+          <div className="flex min-h-screen flex-col">
+            <AppNavbar user={user} />
+            <div className="flex-1 pb-24">{children}</div>
+          </div>
+        ) : (
+          children
+        )}
       </body>
     </html>
   )

@@ -5,7 +5,6 @@ import { sql } from '@payloadcms/db-postgres/drizzle'
 import config from '@payload-config'
 import { getServerUser } from '@/lib/auth'
 import { expandEventTables } from '@/lib/event-tables'
-import { AppNavbar, PageFooter } from '@/components/AppNavbar'
 import {
   EventDashboardClient,
   type DashboardBookingRow,
@@ -239,28 +238,24 @@ export default async function EventDetailPage(props: {
   })
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <AppNavbar user={user} />
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
-        <EventDashboardClient
-          event={{
-            id: event.id,
-            code: event.code,
-            name: event.name,
-            date: event.date,
-            venue: event.venue,
-            publicKey: event.publicKey,
-          }}
-          bookings={bookingRows}
-          tables={tableCards}
-          recentCheckins={recentCheckins.slice(0, 100)}
-          officerSummary={byOfficerSql.rows as unknown as DashboardOfficerSummary[]}
-          modeSummary={byModeSql.rows as unknown as DashboardModeSummary[]}
-          totalSlots={activeTotalSlots}
-          checkedInSlots={activeCheckedInSlots}
-        />
-      </main>
-      <PageFooter />
-    </div>
+    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+      <EventDashboardClient
+        event={{
+          id: event.id,
+          code: event.code,
+          name: event.name,
+          date: event.date,
+          venue: event.venue,
+          publicKey: event.publicKey,
+        }}
+        bookings={bookingRows}
+        tables={tableCards}
+        recentCheckins={recentCheckins.slice(0, 100)}
+        officerSummary={byOfficerSql.rows as unknown as DashboardOfficerSummary[]}
+        modeSummary={byModeSql.rows as unknown as DashboardModeSummary[]}
+        totalSlots={activeTotalSlots}
+        checkedInSlots={activeCheckedInSlots}
+      />
+    </main>
   )
 }
