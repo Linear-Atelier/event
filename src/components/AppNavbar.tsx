@@ -34,6 +34,7 @@ export function AppNavbar({ user }: AppNavbarProps) {
 
   const roles = user.roles || []
   const isSuperAdmin = roles.includes('super_admin')
+  const hideTopHeader = pathname === '/scan' || pathname.startsWith('/scan/')
 
   const bottomNavItems = [
     { href: '/', label: 'Home', icon: Home },
@@ -51,8 +52,9 @@ export function AppNavbar({ user }: AppNavbarProps) {
 
   return (
     <>
-      {/* Minimal White Top App Header */}
-      <header className="no-print sticky top-0 z-30 border-b border-slate-100 bg-white/85 backdrop-blur-md">
+      {/* Minimal White Top App Header (hidden on /scan for full-bleed scanner) */}
+      {!hideTopHeader && (
+        <header className="no-print sticky top-0 z-30 border-b border-slate-100 bg-white/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
           <Link href="/" className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-950 text-xs font-extrabold tracking-tight text-white shadow-sm">
@@ -100,11 +102,12 @@ export function AppNavbar({ user }: AppNavbarProps) {
           </div>
         </div>
       </header>
+      )}
 
-      {/* Fixed App Bottom Navigation Bar */}
+      {/* Fixed Dark App Bottom Navigation Bar */}
       <nav
         aria-label="Primary Navigation"
-        className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/95 backdrop-blur-xl"
+        className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-slate-950/95 backdrop-blur-xl"
       >
         <div className="mx-auto grid max-w-lg grid-cols-5 px-2 py-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {bottomNavItems.map((item) => {
@@ -120,13 +123,13 @@ export function AppNavbar({ user }: AppNavbarProps) {
                 href={item.href}
                 className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 text-[10px] font-semibold transition ${
                   active
-                    ? 'text-slate-950'
-                    : 'text-slate-400 hover:text-slate-700'
+                    ? 'text-white'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 <span
                   className={`flex h-8 w-12 items-center justify-center rounded-full transition ${
-                    active ? 'bg-slate-950 text-white shadow-sm' : 'bg-transparent'
+                    active ? 'bg-white text-slate-950 shadow-sm' : 'bg-transparent'
                   }`}
                 >
                   <Icon className="h-4 w-4" />

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -12,6 +12,7 @@ import {
   Ticket,
   UserCheck,
   Users,
+  Wallet,
   X,
 } from 'lucide-react'
 import { evaluateTableAllocation } from '@/lib/table-allocation'
@@ -161,6 +162,30 @@ export function BookingDeskClient({
   const [editSelectedTables, setEditSelectedTables] = useState<string[]>([])
   const [editResend, setEditResend] = useState(true)
   const [manageMessage, setManageMessage] = useState<string | null>(null)
+  const summaryCardRef = useRef<HTMLDivElement | null>(null)
+  const [isSummaryInView, setIsSummaryInView] = useState(false)
+
+  useEffect(() => {
+    if (mode !== 'new') return
+    const el = summaryCardRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsSummaryInView(entry.isIntersecting)
+      },
+      { threshold: 0.15 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [mode])
+
+  const paymentModeLabel: Record<typeof paymentMode, string> = {
+    CASH: 'CASH',
+    OFFICER_UPI: 'OFFICER UPI',
+    PAY_AT_DOOR: 'PAY AT DOOR',
+    COMPLIMENTARY: 'COMPLIMENTARY',
+  }
 
   const loadEventMeta = useCallback(async (eventId: number) => {
     if (!eventId) return
@@ -1203,8 +1228,8 @@ export function BookingDeskClient({
           </div>
 
           {/* Right Column: Payment & Instant Summary */}
-          <div className="space-y-4">
-            <div className="sticky top-20 rounded-3xl bg-slate-50/90 p-5">
+          <div className="space-y-4 pb-20 lg:pb-0">
+            <div ref={summaryCardRef} className="sticky top-20 rounded-3xl bg-slate-50/90 p-5">
               <h2 className="text-sm font-bold text-slate-900">Booking Summary &amp; Payment</h2>
 
               <div className="mt-4 space-y-2 border-b border-slate-100 pb-4 text-xs">
@@ -1282,6 +1307,66 @@ export function BookingDeskClient({
               </div>
             </div>
           </div>
+
+          {/* Zomato-Style Sticky Mobile Checkout Bar (shown when Booking Summary & Payment is out of view) */}
+          {!isSummaryInView && (
+            <div className="fixed inset-x-0 bottom-19 z-30 border-t border-white/10 bg-slate-950/95 px-4 py-2.5 text-white shadow-2xl backdrop-blur-xl lg:hidden">
+              <div className="mx-auto flex max-w-2xl items-center gap-3">
+                {/* Left: PAY USING ▲ + Payment Mode Picker */}
+                <div className="relative flex shrink-0 flex-col justify-center pr-1">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <span className="flex h-4 w-5 items-center justify-center rounded bg-white text-slate-950">
+                      <Wallet className="h-3 w-3" />
+                    </span>
+                    <span>PAY USING</span>
+                    <span className="text-[8px] leading-none">▲</span>
+                  </div>
+                  <div className="mt-0.5 text-xs font-extrabold tracking-wide text-white">
+                    {paymentModeLabel[paymentMode]}
+                  </div>
+                  <select
+                    aria-label="Select Payment Mode"
+                    value={paymentMode}
+                    onChange={(e) =>
+                      setPaymentMode(
+                        e.target.value as
+                        | 'CASH'
+                        | 'OFFICER_UPI'
+                        | 'COMPLIMENTARY'
+                        | 'PAY_AT_DOOR',
+                      )
+                    }
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0 bg-neutral-800 "
+                  >
+                    <option value="CASH">Cash (Collected by Me)</option>
+                    <option value="OFFICER_UPI">Officer UPI</option>
+                    <option value="PAY_AT_DOOR">Pay at Door</option>
+                    <option value="COMPLIMENTARY">Complimentary (₹0)</option>
+                  </select>
+                </div>
+
+                {/* Right: Split Total Amount + Confirm Button */}
+                <button
+                  type="submit"
+                  disabled={!canCreate || submitting || totalPax === 0 || missingPaxCount > 0}
+                  className="flex flex-1 items-center justify-between rounded-2xl bg-sky-500 px-4 py-2.5 text-slate-950 shadow-lg transition hover:bg-sky-400 active:scale-[0.99] disabled:opacity-45"
+                >
+                  <div className="text-left leading-tight">
+                    <div className="text-base font-extrabold tracking-tight">
+                      ₹{totalAmount.toLocaleString('en-IN')}
+                    </div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-950/75">
+                      TOTAL{totalPax > 0 ? ` · ${totalPax} PAX` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 text-sm font-extrabold">
+                    <span>{submitting ? 'Booking…' : 'Confirm'}</span>
+                    <span className="text-xs leading-none">▸</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
         </form>
       ) : (
         /* MANAGE BOOKINGS, PHYSICAL STUBS, TABLE EDITS, CANCEL/TRANSFER */

@@ -6,15 +6,12 @@ import {
   Camera,
   CameraOff,
   CheckCircle2,
-  CloudDownload,
-  CloudUpload,
   Lock,
   Plus,
-  QrCode,
+  RefreshCw,
   Search,
   ShieldAlert,
   ShieldCheck,
-  UserPlus,
   Wifi,
   WifiOff,
   X,
@@ -27,6 +24,10 @@ import {
   type CachedSlot,
 } from '@/lib/offline-db'
 import { parseQRJson, verifyQRSignatureOffline } from '@/lib/qr-verify'
+import type {
+  GateSyncWorkerInMessage,
+  GateSyncWorkerOutMessage,
+} from '@/workers/gate-sync.worker'
 
 interface EventOption {
   id: number
@@ -87,9 +88,10 @@ export function GateScannerClient({
   const [cachedEvent, setCachedEvent] = useState<CachedEvent | null>(null)
   const [cachedBookingCount, setCachedBookingCount] = useState(0)
   const [pendingSyncCount, setPendingSyncCount] = useState(0)
-  const [downloading, setDownloading] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
   const [statusBanner, setStatusBanner] = useState<string | null>(null)
+  const syncWorkerRef = useRef<Worker | null>(null)
 
   // Camera & QR
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -176,126 +178,70 @@ export function GateScannerClient({
       .catch(() => { })
   }, [selectedEventId, isOnline])
 
-  const syncRosterToIndexedDb = useCallback(async (eventId: number) => {
-    const res = await fetch(`/api/sync/roster?eventId=${eventId}`, {
-      credentials: 'include',
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to download roster')
+  // Dedicated Web Worker for off-main-thread Push -> Pull sync (auto-runs every 60s)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof Worker === 'undefined') return
+    const worker = new Worker(
+      new URL('../workers/gate-sync.worker.ts', import.meta.url),
+    )
+    syncWorkerRef.current = worker
+
+    worker.onmessage = (event: MessageEvent<GateSyncWorkerOutMessage>) => {
+      const msg = event.data
+      if (msg.type === 'SYNC_START') {
+        setSyncing(true)
+        if (msg.manual) setStatusBanner(null)
+      } else if (msg.type === 'SYNC_COMPLETE') {
+        setSyncing(false)
+        setCachedEvent(msg.cachedEvent)
+        setCachedBookingCount(msg.bookingCount)
+        setPendingSyncCount(msg.pendingCount)
+        setLastSyncedAt(msg.syncedAt)
+        if (msg.manual) {
+          const pushSummary =
+            msg.pushedCount > 0 ? `Pushed ${msg.pushedCount} check-in(s) · ` : ''
+          setStatusBanner(
+            `${pushSummary}Synced ${msg.bookingCount} bookings & ${msg.slotCount} attendee slots.`,
+          )
+        }
+      } else if (msg.type === 'SYNC_ERROR') {
+        setSyncing(false)
+        if (msg.manual) {
+          setStatusBanner(msg.error)
+        }
+      }
     }
 
-    await offlineDb.transaction(
-      'rw',
-      [offlineDb.events, offlineDb.bookings, offlineDb.tickets, offlineDb.slots],
-      async () => {
-        await offlineDb.events.put(data.event)
-        // Clear old bookings/tickets/slots for this event
-        const oldBookings = await offlineDb.bookings
-          .where('eventId')
-          .equals(eventId)
-          .toArray()
-        const oldIds = oldBookings.map((b) => b.id)
-        if (oldIds.length > 0) {
-          await offlineDb.bookings.bulkDelete(oldIds)
-          await offlineDb.tickets.where('bookingId').anyOf(oldIds).delete()
-          await offlineDb.slots.where('bookingId').anyOf(oldIds).delete()
-        }
-        if (data.bookings?.length) await offlineDb.bookings.bulkPut(data.bookings)
-        if (data.tickets?.length) await offlineDb.tickets.bulkPut(data.tickets)
-        if (data.slots?.length) await offlineDb.slots.bulkPut(data.slots)
-      },
-    )
-
-    return data
+    return () => {
+      worker.terminate()
+      syncWorkerRef.current = null
+    }
   }, [])
 
-  // Auto-refresh cached roster when online and no unsynced local check-ins are pending
+  // Configure worker with active event & online status (triggers immediate sync + 60s loop)
   useEffect(() => {
-    if (!selectedEventId || !isOnline) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const unsynced = await offlineDb.pendingSync.where('synced').equals(0).count()
-        if (cancelled || unsynced > 0) return
-        await syncRosterToIndexedDb(selectedEventId)
-        if (!cancelled) {
-          await refreshLocalStats(selectedEventId)
-        }
-      } catch {
-        // Keep existing offline cache if network fails
+    if (!syncWorkerRef.current || !selectedEventId) return
+    const msg: GateSyncWorkerInMessage = {
+      type: 'CONFIGURE',
+      eventId: selectedEventId,
+      isOnline,
+    }
+    syncWorkerRef.current.postMessage(msg)
+  }, [selectedEventId, isOnline])
+
+  // Unified one-button Push + Pull sync on the worker thread
+  const triggerUnifiedSync = useCallback(
+    (manual: boolean) => {
+      if (!selectedEventId || !isOnline || !syncWorkerRef.current) return
+      const msg: GateSyncWorkerInMessage = {
+        type: 'SYNC_NOW',
+        eventId: selectedEventId,
+        manual,
       }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [selectedEventId, isOnline, syncRosterToIndexedDb, refreshLocalStats])
-
-  // Download full event roster to Dexie IndexedDB
-  async function handleDownloadRoster() {
-    if (!selectedEventId) return
-    setDownloading(true)
-    setStatusBanner(null)
-    try {
-      const data = await syncRosterToIndexedDb(selectedEventId)
-      await refreshLocalStats(selectedEventId)
-      setStatusBanner(
-        `Roster cached offline: ${data.bookings.length} bookings & ${data.slots.length} attendee slots ready for dead-zone scanning.`,
-      )
-    } catch (err) {
-      setStatusBanner(
-        err instanceof Error
-          ? err.message
-          : 'Offline or network error while downloading roster.',
-      )
-    } finally {
-      setDownloading(false)
-    }
-  }
-
-  // Sync pending offline check-ins to server (idempotent)
-  const handleSyncPending = useCallback(async () => {
-    const pending = await offlineDb.pendingSync.where('synced').equals(0).toArray()
-    if (pending.length === 0) return
-    setSyncing(true)
-    try {
-      const res = await fetch('/api/sync/checkins', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          checkins: pending.map((p) => ({
-            slotId: p.slotId,
-            checkedInAt: p.checkedInAt,
-            deviceId: p.deviceId,
-            method: p.method,
-          })),
-        }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        const ids = pending.map((p) => p.id!).filter(Boolean)
-        await offlineDb.pendingSync.where('id').anyOf(ids).modify({ synced: 1 })
-        await refreshLocalStats(selectedEventId)
-        setStatusBanner(
-          `Synced ${data.synced} check-in(s) to server (${data.alreadyLocked} already locked).`,
-        )
-      }
-    } catch {
-      // Remain queued offline
-    } finally {
-      setSyncing(false)
-    }
-  }, [refreshLocalStats, selectedEventId])
-
-  // Auto-sync when coming back online
-  useEffect(() => {
-    if (!isOnline || pendingSyncCount === 0) return
-    const timer = setTimeout(() => {
-      void handleSyncPending()
-    }, 0)
-    return () => clearTimeout(timer)
-  }, [isOnline, pendingSyncCount, handleSyncPending])
+      syncWorkerRef.current.postMessage(msg)
+    },
+    [selectedEventId, isOnline],
+  )
 
   // Open pre-ticked checklist for a booking, grouping couples / multi-pax tickets together
   const openBookingChecklist = useCallback(
@@ -468,7 +414,7 @@ export function GateScannerClient({
           void startCamera()
         }
       })
-      .catch(() => {})
+      .catch(() => { })
 
     return () => {
       cancelled = true
@@ -566,7 +512,7 @@ export function GateScannerClient({
       setLookupQuery('')
 
       if (navigator.onLine) {
-        handleSyncPending()
+        triggerUnifiedSync(false)
       }
     } finally {
       setSavingCheckin(false)
@@ -647,15 +593,14 @@ export function GateScannerClient({
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-[70px] top-[57px] z-10 mx-auto flex max-w-2xl flex-col bg-white">
+    <div className="fixed inset-x-0 bottom-[70px] top-0 z-10 mx-auto flex max-w-2xl flex-col bg-white">
       {/* Top Frosted Glass Scanner Hero */}
       <div className="glass-surface shrink-0 px-4 py-3.5 text-white">
         <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
             <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
-                isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-              }`}
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                }`}
             >
               {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
               {isOnline ? 'Online' : 'Offline Dead-Zone Mode'}
@@ -676,45 +621,45 @@ export function GateScannerClient({
           </select>
         </div>
 
-        {/* Offline Roster Sync Controls */}
+        {/* Unified Offline Sync Bar (Auto-syncs every 60s in Web Worker) */}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2.5">
           <div className="text-xs text-slate-300">
             {cachedEvent ? (
               <span>
                 Cached: <strong>{cachedBookingCount} bookings</strong>
+                {lastSyncedAt && (
+                  <span className="ml-2 text-[11px] text-slate-400">
+                    · Synced{' '}
+                    {new Date(lastSyncedAt).toLocaleTimeString('en-IN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                )}
               </span>
             ) : (
               <span className="text-amber-300">
-                No roster cached yet — download before venue dead-zone!
+                No roster cached yet — tap Sync before venue dead-zone!
               </span>
             )}
           </div>
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={downloading || !isOnline}
-              onClick={handleDownloadRoster}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-sky-400 disabled:opacity-50"
-            >
-              <CloudDownload className="h-3.5 w-3.5" />
-              {downloading ? 'Downloading…' : 'Download Roster'}
-            </button>
-
-            <button
-              type="button"
-              disabled={syncing || pendingSyncCount === 0 || !isOnline}
-              onClick={handleSyncPending}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold ${
-                pendingSyncCount > 0
-                  ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
-                  : 'bg-slate-800 text-slate-400'
+          <button
+            type="button"
+            disabled={syncing || !isOnline}
+            onClick={() => triggerUnifiedSync(true)}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${pendingSyncCount > 0
+              ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
+              : 'bg-sky-500 text-slate-950 hover:bg-sky-400'
               } disabled:opacity-50`}
-            >
-              <CloudUpload className="h-3.5 w-3.5" />
-              {syncing ? 'Syncing…' : `Sync (${pendingSyncCount})`}
-            </button>
-          </div>
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing
+              ? 'Syncing…'
+              : pendingSyncCount > 0
+                ? `Sync (${pendingSyncCount})`
+                : 'Sync'}
+          </button>
         </div>
       </div>
 
@@ -730,7 +675,7 @@ export function GateScannerClient({
       {tab === 'scan' ? (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Center Camera Viewport / Centered Camera Toggle */}
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-white">
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
             {cameraActive ? (
               <div className="relative h-full w-full bg-black">
                 <video
@@ -778,51 +723,6 @@ export function GateScannerClient({
                     {cameraError}
                   </p>
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* Offline Manual Lookup (Borderless White Sheet at Bottom) */}
-          <div className="ticket-perforation shrink-0 bg-white px-4 py-4">
-            <h2 className="text-sm font-bold text-slate-900">
-              Manual Lookup
-            </h2>
-            <div className="relative mt-2">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input
-                type="text"
-                value={lookupQuery}
-                onChange={(e) => setLookupQuery(e.target.value)}
-                placeholder="Type XMAS26-B001, phone number, or guest name..."
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm focus:border-sky-500 focus:bg-white focus:outline-none"
-              />
-            </div>
-
-            {visibleLookupResults.length > 0 && (
-              <div className="mt-3 max-h-52 divide-y divide-dashed divide-slate-200 overflow-y-auto">
-                {visibleLookupResults.map((b) => (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => openBookingChecklist(b, 'manual', 'manual_code')}
-                    className="flex w-full items-center justify-between px-1 py-3 text-left transition hover:bg-slate-50"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900">{b.bookingCode}</span>
-                        <span className="text-sm font-medium text-slate-800">
-                          {b.holderName}
-                        </span>
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {b.phone} · {b.totalPax} Pax · Tables: {b.tablesSummary}
-                      </div>
-                    </div>
-                    <span className="rounded-xl bg-sky-100 px-3 py-1.5 text-xs font-bold text-sky-800">
-                      Check In →
-                    </span>
-                  </button>
-                ))}
               </div>
             )}
           </div>
@@ -990,6 +890,52 @@ export function GateScannerClient({
           </button>
         </form>
       )}
+
+
+      {/* Offline Manual Lookup (Dark Frosted Glass Sheet at Bottom) */}
+      <div className="glass-surface border-t border-white/15 px-4 py-4 pb-6 text-white">
+        <h2 className="text-sm font-bold text-white">
+          Manual Lookup
+        </h2>
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            value={lookupQuery}
+            onChange={(e) => setLookupQuery(e.target.value)}
+            placeholder="Type XMAS26-B001, phone number, or guest name..."
+            className="w-full rounded-2xl border border-white/15 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white placeholder-slate-400 transition focus:border-sky-400 focus:bg-white/15 focus:outline-none"
+          />
+        </div>
+
+        {visibleLookupResults.length > 0 && (
+          <div className="mt-3 max-h-52 divide-y divide-dashed divide-white/10 overflow-y-auto">
+            {visibleLookupResults.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => openBookingChecklist(b, 'manual', 'manual_code')}
+                className="flex w-full items-center justify-between rounded-xl px-2 py-3 text-left transition hover:bg-white/10"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white">{b.bookingCode}</span>
+                    <span className="text-sm font-medium text-slate-200">
+                      {b.holderName}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {b.phone} · {b.totalPax} Pax · Tables: {b.tablesSummary}
+                  </div>
+                </div>
+                <span className="rounded-xl bg-sky-500/20 px-3 py-1.5 text-xs font-bold text-sky-300">
+                  Check In →
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* PRE-TICKED ATTENDEE CHECKLIST MODAL */}
       {activeBooking && (
