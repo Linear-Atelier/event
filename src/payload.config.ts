@@ -17,6 +17,7 @@ import { NotificationLogs } from './collections/NotificationLogs'
 import { TicketCheckinSlots } from './collections/TicketCheckinSlots'
 import { TicketTypes } from './collections/TicketTypes'
 import { Users } from './collections/Users'
+import { plunkEmailAdapter } from './lib/plunk-email-adapter'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -45,6 +46,12 @@ export default buildConfig({
     Media,
   ],
   editor: lexicalEditor(),
+  email: plunkEmailAdapter({
+    apiKey: process.env.PLUNK_API_KEY,
+    apiUrl: process.env.PLUNK_API_URL,
+    defaultFromAddress: process.env.PLUNK_FROM_EMAIL || 'tickets@linearatelier.com',
+    defaultFromName: process.env.PLUNK_FROM_NAME || 'AIAIA Cochin Branch',
+  }),
   secret: process.env.PAYLOAD_SECRET || '',
   typescript: {
     outputFile: path.resolve(dirname, 'payload-types.ts'),

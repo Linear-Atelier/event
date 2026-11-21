@@ -29,7 +29,7 @@ export default async function GateScanPage(props: {
   const canScan = userHasRole(user, ['gate_staff', 'booking_officer', 'super_admin'])
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+    <main className="mx-auto w-full max-w-5xl">
       <GateScannerClient
         events={eventsRes.docs.map((e) => ({
           id: e.id,

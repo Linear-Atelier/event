@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
+import { getPayload } from 'payload'
+import config from '@payload-config'
 import { getRequestUser, userHasRole } from '@/lib/auth'
-import { sendPlunkEmail, sendWhatsAppTemplate } from '@/lib/notifications'
+import { sendWhatsAppTemplate } from '@/lib/notifications'
 
 export async function POST(request: Request) {
   const user = await getRequestUser(request)
@@ -21,18 +23,24 @@ export async function POST(request: Request) {
     if (!body.email) {
       return NextResponse.json({ error: 'email is required' }, { status: 400 })
     }
-    const res = await sendPlunkEmail({
-      to: body.email,
-      subject: 'AIAIA Cochin Branch — Plunk Email Test',
-      body: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px;">
-          <h2 style="margin: 0 0 8px;">Plunk Email Connected</h2>
-          <p style="margin: 0; color: #475569;">This is a test email from the AIAIA Cochin Branch Ticketing Portal.</p>
-          <p style="margin: 16px 0 0; font-size: 12px; color: #94a3b8;">Linear Atelier · Ticketing Partner</p>
-        </div>
-      `,
-    })
-    return NextResponse.json(res, { status: res.ok ? 200 : 400 })
+    try {
+      const payload = await getPayload({ config })
+      const res = await payload.sendEmail({
+        to: body.email,
+        subject: 'AIAIA Cochin Branch — Plunk Email Test',
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px;">
+            <h2 style="margin: 0 0 8px;">Plunk Email Connected</h2>
+            <p style="margin: 0; color: #475569;">This is a test email sent via Payload's Plunk Email Adapter.</p>
+            <p style="margin: 16px 0 0; font-size: 12px; color: #94a3b8;">Linear Atelier · Ticketing Partner</p>
+          </div>
+        `,
+      })
+      return NextResponse.json({ ok: true, result: res }, { status: 200 })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Email send failed'
+      return NextResponse.json({ ok: false, error: message }, { status: 400 })
+    }
   }
 
   if (body.channel === 'whatsapp') {

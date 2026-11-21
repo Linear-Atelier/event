@@ -434,44 +434,29 @@ export async function sendBookingNotifications(
         </div>
       `
 
-      const emailRes = await sendPlunkEmail({
+      const emailRes = (await input.payload.sendEmail({
         to: input.email,
         subject,
-        body: htmlBody,
-      })
+        html: htmlBody,
+      })) as { id?: string } | undefined
 
-      if (emailRes.ok) {
-        results.email = 'sent'
-        await input.payload.create({
-          collection: 'notification-logs',
-          overrideAccess: true,
-          data: {
-            booking: input.bookingId,
-            channel: 'email',
-            trigger: input.trigger,
-            status: 'sent',
-            providerMessageId: emailRes.id || '',
-            sentAt: new Date().toISOString(),
-          },
-        })
-      } else {
-        results.email = 'failed'
-        results.emailError = emailRes.error || 'Plunk email failed'
-        await input.payload.create({
-          collection: 'notification-logs',
-          overrideAccess: true,
-          data: {
-            booking: input.bookingId,
-            channel: 'email',
-            trigger: input.trigger,
-            status: 'failed',
-            errorMessage: emailRes.error || 'Plunk email failed',
-            sentAt: new Date().toISOString(),
-          },
-        })
-      }
+      results.email = 'sent'
+      await input.payload.create({
+        collection: 'notification-logs',
+        overrideAccess: true,
+        data: {
+          booking: input.bookingId,
+          channel: 'email',
+          trigger: input.trigger,
+          status: 'sent',
+          providerMessageId: emailRes?.id || '',
+          sentAt: new Date().toISOString(),
+        },
+      })
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Plunk email failed'
       results.email = 'failed'
+      results.emailError = errMsg
       await input.payload.create({
         collection: 'notification-logs',
         overrideAccess: true,
@@ -480,7 +465,7 @@ export async function sendBookingNotifications(
           channel: 'email',
           trigger: input.trigger,
           status: 'failed',
-          errorMessage: err instanceof Error ? err.message : 'Plunk email failed',
+          errorMessage: errMsg,
           sentAt: new Date().toISOString(),
         },
       })

@@ -80,7 +80,7 @@ export function GateScannerClient({
     () => true,
   )
   const deviceId = useSyncExternalStore(
-    () => () => {},
+    () => () => { },
     () => getOrCreateDeviceId(),
     () => 'GATE-LOCAL',
   )
@@ -96,6 +96,7 @@ export function GateScannerClient({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const rafRef = useRef<number | null>(null)
+  const userStoppedCameraRef = useRef(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
 
@@ -125,7 +126,7 @@ export function GateScannerClient({
   // Register Service Worker
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {})
+      navigator.serviceWorker.register('/sw.js').catch(() => { })
     }
   }, [])
 
@@ -175,49 +176,78 @@ export function GateScannerClient({
       .catch(() => { })
   }, [selectedEventId, isOnline])
 
+  const syncRosterToIndexedDb = useCallback(async (eventId: number) => {
+    const res = await fetch(`/api/sync/roster?eventId=${eventId}`, {
+      credentials: 'include',
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to download roster')
+    }
+
+    await offlineDb.transaction(
+      'rw',
+      [offlineDb.events, offlineDb.bookings, offlineDb.tickets, offlineDb.slots],
+      async () => {
+        await offlineDb.events.put(data.event)
+        // Clear old bookings/tickets/slots for this event
+        const oldBookings = await offlineDb.bookings
+          .where('eventId')
+          .equals(eventId)
+          .toArray()
+        const oldIds = oldBookings.map((b) => b.id)
+        if (oldIds.length > 0) {
+          await offlineDb.bookings.bulkDelete(oldIds)
+          await offlineDb.tickets.where('bookingId').anyOf(oldIds).delete()
+          await offlineDb.slots.where('bookingId').anyOf(oldIds).delete()
+        }
+        if (data.bookings?.length) await offlineDb.bookings.bulkPut(data.bookings)
+        if (data.tickets?.length) await offlineDb.tickets.bulkPut(data.tickets)
+        if (data.slots?.length) await offlineDb.slots.bulkPut(data.slots)
+      },
+    )
+
+    return data
+  }, [])
+
+  // Auto-refresh cached roster when online and no unsynced local check-ins are pending
+  useEffect(() => {
+    if (!selectedEventId || !isOnline) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const unsynced = await offlineDb.pendingSync.where('synced').equals(0).count()
+        if (cancelled || unsynced > 0) return
+        await syncRosterToIndexedDb(selectedEventId)
+        if (!cancelled) {
+          await refreshLocalStats(selectedEventId)
+        }
+      } catch {
+        // Keep existing offline cache if network fails
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedEventId, isOnline, syncRosterToIndexedDb, refreshLocalStats])
+
   // Download full event roster to Dexie IndexedDB
   async function handleDownloadRoster() {
     if (!selectedEventId) return
     setDownloading(true)
     setStatusBanner(null)
     try {
-      const res = await fetch(`/api/sync/roster?eventId=${selectedEventId}`, {
-        credentials: 'include',
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setStatusBanner(data.error || 'Failed to download roster')
-        return
-      }
-
-      await offlineDb.transaction(
-        'rw',
-        [offlineDb.events, offlineDb.bookings, offlineDb.tickets, offlineDb.slots],
-        async () => {
-          await offlineDb.events.put(data.event)
-          // Clear old bookings/tickets/slots for this event
-          const oldBookings = await offlineDb.bookings
-            .where('eventId')
-            .equals(selectedEventId)
-            .toArray()
-          const oldIds = oldBookings.map((b) => b.id)
-          if (oldIds.length > 0) {
-            await offlineDb.bookings.bulkDelete(oldIds)
-            await offlineDb.tickets.where('bookingId').anyOf(oldIds).delete()
-            await offlineDb.slots.where('bookingId').anyOf(oldIds).delete()
-          }
-          if (data.bookings?.length) await offlineDb.bookings.bulkPut(data.bookings)
-          if (data.tickets?.length) await offlineDb.tickets.bulkPut(data.tickets)
-          if (data.slots?.length) await offlineDb.slots.bulkPut(data.slots)
-        },
-      )
-
+      const data = await syncRosterToIndexedDb(selectedEventId)
       await refreshLocalStats(selectedEventId)
       setStatusBanner(
         `Roster cached offline: ${data.bookings.length} bookings & ${data.slots.length} attendee slots ready for dead-zone scanning.`,
       )
-    } catch {
-      setStatusBanner('Offline or network error while downloading roster.')
+    } catch (err) {
+      setStatusBanner(
+        err instanceof Error
+          ? err.message
+          : 'Offline or network error while downloading roster.',
+      )
     } finally {
       setDownloading(false)
     }
@@ -425,6 +455,26 @@ export function GateScannerClient({
     }
   }, [handleQrDecoded, stopCamera])
 
+  // Auto-open camera on mount if camera permission is already granted
+  useEffect(() => {
+    if (tab !== 'scan' || userStoppedCameraRef.current) return
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
+
+    let cancelled = false
+    navigator.permissions
+      .query({ name: 'camera' as PermissionName })
+      .then((status) => {
+        if (!cancelled && status.state === 'granted' && !streamRef.current) {
+          void startCamera()
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [tab, startCamera])
+
   useEffect(() => {
     return () => stopCamera()
   }, [stopCamera])
@@ -435,40 +485,40 @@ export function GateScannerClient({
     if (!q) return
 
     let cancelled = false
-    ; (async () => {
-      const allBookings = await offlineDb.bookings
-        .where('eventId')
-        .equals(selectedEventId)
-        .toArray()
+      ; (async () => {
+        const allBookings = await offlineDb.bookings
+          .where('eventId')
+          .equals(selectedEventId)
+          .toArray()
 
-      // Also match ticket codes (e.g. B042-T01) and individual attendee names
-      const [matchingTickets, matchingSlots] = await Promise.all([
-        offlineDb.tickets
-          .filter((t) => t.ticketCode.toLowerCase().includes(q))
-          .toArray(),
-        offlineDb.slots
-          .filter(
-            (s) =>
-              (s.attendeeName?.toLowerCase().includes(q) ?? false) ||
-              s.label.toLowerCase().includes(q),
-          )
-          .toArray(),
-      ])
-      if (cancelled) return
+        // Also match ticket codes (e.g. B042-T01) and individual attendee names
+        const [matchingTickets, matchingSlots] = await Promise.all([
+          offlineDb.tickets
+            .filter((t) => t.ticketCode.toLowerCase().includes(q))
+            .toArray(),
+          offlineDb.slots
+            .filter(
+              (s) =>
+                (s.attendeeName?.toLowerCase().includes(q) ?? false) ||
+                s.label.toLowerCase().includes(q),
+            )
+            .toArray(),
+        ])
+        if (cancelled) return
 
-      const ticketBookingIds = new Set(matchingTickets.map((t) => t.bookingId))
-      const slotBookingIds = new Set(matchingSlots.map((s) => s.bookingId))
+        const ticketBookingIds = new Set(matchingTickets.map((t) => t.bookingId))
+        const slotBookingIds = new Set(matchingSlots.map((s) => s.bookingId))
 
-      const matched = allBookings.filter(
-        (b) =>
-          b.bookingCode.toLowerCase().includes(q) ||
-          b.holderName.toLowerCase().includes(q) ||
-          b.phone.toLowerCase().includes(q) ||
-          ticketBookingIds.has(b.id) ||
-          slotBookingIds.has(b.id),
-      )
-      setLookupResults(matched.slice(0, 15))
-    })()
+        const matched = allBookings.filter(
+          (b) =>
+            b.bookingCode.toLowerCase().includes(q) ||
+            b.holderName.toLowerCase().includes(q) ||
+            b.phone.toLowerCase().includes(q) ||
+            ticketBookingIds.has(b.id) ||
+            slotBookingIds.has(b.id),
+        )
+        setLookupResults(matched.slice(0, 15))
+      })()
 
     return () => {
       cancelled = true
@@ -597,25 +647,20 @@ export function GateScannerClient({
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5">
+    <div className="fixed inset-x-0 bottom-[70px] top-[57px] z-10 mx-auto flex max-w-2xl flex-col bg-white">
       {/* Top Frosted Glass Scanner Hero */}
-      <div className="glass-surface rounded-3xl p-5 text-white shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <QrCode className="h-5 w-5 text-sky-400" />
-              <h1 className="text-lg font-bold">Gate Check-In PWA</h1>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-300">
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-                  }`}
-              >
-                {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-                {isOnline ? 'Online' : 'Offline Dead-Zone Mode'}
-              </span>
-              <span>Device: {deviceId}</span>
-            </div>
+      <div className="glass-surface shrink-0 px-4 py-3.5 text-white">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+                isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+              }`}
+            >
+              {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+              {isOnline ? 'Online' : 'Offline Dead-Zone Mode'}
+            </span>
+            <span>Device: {deviceId}</span>
           </div>
 
           <select
@@ -632,7 +677,7 @@ export function GateScannerClient({
         </div>
 
         {/* Offline Roster Sync Controls */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2.5">
           <div className="text-xs text-slate-300">
             {cachedEvent ? (
               <span>
@@ -660,10 +705,11 @@ export function GateScannerClient({
               type="button"
               disabled={syncing || pendingSyncCount === 0 || !isOnline}
               onClick={handleSyncPending}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold ${pendingSyncCount > 0
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold ${
+                pendingSyncCount > 0
                   ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
                   : 'bg-slate-800 text-slate-400'
-                } disabled:opacity-50`}
+              } disabled:opacity-50`}
             >
               <CloudUpload className="h-3.5 w-3.5" />
               {syncing ? 'Syncing…' : `Sync (${pendingSyncCount})`}
@@ -673,7 +719,7 @@ export function GateScannerClient({
       </div>
 
       {statusBanner && (
-        <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs font-medium text-sky-900">
+        <div className="flex shrink-0 items-center justify-between border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs font-medium text-sky-900">
           <span>{statusBanner}</span>
           <button type="button" onClick={() => setStatusBanner(null)}>
             <X className="h-4 w-4" />
@@ -681,85 +727,63 @@ export function GateScannerClient({
         </div>
       )}
 
-      {/* Mode Switch: Check-In vs Door Sales (White App Pill Switcher) */}
-      <div className="grid grid-cols-2 rounded-2xl bg-slate-100/90 p-1">
-        <button
-          type="button"
-          onClick={() => setTab('scan')}
-          className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold transition ${tab === 'scan'
-              ? 'bg-white text-slate-950 shadow-xs'
-              : 'text-slate-500 hover:text-slate-900'
-            }`}
-        >
-          <QrCode className="h-4 w-4" />
-          QR Scan &amp; Lookup
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            stopCamera()
-            setTab('door')
-          }}
-          className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold transition ${tab === 'door'
-              ? 'bg-white text-slate-950 shadow-xs'
-              : 'text-slate-500 hover:text-slate-900'
-            }`}
-        >
-          <UserPlus className="h-4 w-4" />
-          Door Sales / Walk-In
-        </button>
-      </div>
-
       {tab === 'scan' ? (
-        <div className="space-y-6">
-          {/* Camera QR Scanner (Frosted Glass Accent) */}
-          <div className="glass-surface rounded-3xl p-4 text-white shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-white">Master QR Camera Scanner</h2>
-              </div>
-              <button
-                type="button"
-                onClick={cameraActive ? stopCamera : startCamera}
-                className={`inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2 text-xs font-bold transition ${cameraActive
-                    ? 'bg-rose-500 text-white hover:bg-rose-600'
-                    : 'bg-white text-slate-950 hover:bg-slate-100'
-                  }`}
-              >
-                {cameraActive ? (
-                  <>
-                    <CameraOff className="h-3.5 w-3.5" /> Stop Camera
-                  </>
-                ) : (
-                  <>
-                    <Camera className="h-3.5 w-3.5" /> Start Camera
-                  </>
-                )}
-              </button>
-            </div>
-
-            {cameraError && (
-              <p className="mt-2 text-xs text-rose-300">{cameraError}</p>
-            )}
-
-            {cameraActive && (
-              <div className="relative mt-4 overflow-hidden rounded-2xl border border-white/15 bg-black">
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Center Camera Viewport / Centered Camera Toggle */}
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-white">
+            {cameraActive ? (
+              <div className="relative h-full w-full bg-black">
                 <video
                   ref={videoRef}
                   playsInline
                   muted
-                  className="h-64 w-full object-cover"
+                  className="h-full w-full object-cover"
                 />
                 <canvas ref={canvasRef} className="hidden" />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-44 w-44 rounded-2xl border-2 border-sky-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
+                  <div className="h-52 w-52 rounded-3xl border-2 border-sky-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
                 </div>
+                <div className="absolute inset-x-0 bottom-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      userStoppedCameraRef.current = true
+                      stopCamera()
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-950/80 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-rose-600"
+                  >
+                    <CameraOff className="h-4 w-4" />
+                    Stop Camera
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center px-6 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    userStoppedCameraRef.current = false
+                    void startCamera()
+                  }}
+                  className="glass-surface inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-sm font-bold text-white shadow-xl transition hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  <Camera className="h-5 w-5 text-sky-300" />
+                  Start Camera
+                </button>
+                <p className="mt-3 text-xs text-slate-400">
+                  Tap to scan Master QR passes offline
+                </p>
+                {cameraError && (
+                  <p className="mt-2 max-w-xs text-xs font-medium text-rose-600">
+                    {cameraError}
+                  </p>
+                )}
               </div>
             )}
           </div>
 
-          {/* Offline Manual Lookup (Borderless White Sheet) */}
-          <div className="ticket-perforation pt-5">
+          {/* Offline Manual Lookup (Borderless White Sheet at Bottom) */}
+          <div className="ticket-perforation shrink-0 bg-white px-4 py-4">
             <h2 className="text-sm font-bold text-slate-900">
               Manual Lookup
             </h2>
@@ -769,19 +793,19 @@ export function GateScannerClient({
                 type="text"
                 value={lookupQuery}
                 onChange={(e) => setLookupQuery(e.target.value)}
-                placeholder="Type B001, B001-T01, phone number, or guest name..."
+                placeholder="Type XMAS26-B001, phone number, or guest name..."
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm focus:border-sky-500 focus:bg-white focus:outline-none"
               />
             </div>
 
             {visibleLookupResults.length > 0 && (
-              <div className="mt-3 divide-y divide-dashed divide-slate-200">
+              <div className="mt-3 max-h-52 divide-y divide-dashed divide-slate-200 overflow-y-auto">
                 {visibleLookupResults.map((b) => (
                   <button
                     key={b.id}
                     type="button"
                     onClick={() => openBookingChecklist(b, 'manual', 'manual_code')}
-                    className="flex w-full items-center justify-between px-1 py-3.5 text-left transition hover:bg-slate-50"
+                    className="flex w-full items-center justify-between px-1 py-3 text-left transition hover:bg-slate-50"
                   >
                     <div>
                       <div className="flex items-center gap-2">
@@ -1044,10 +1068,10 @@ export function GateScannerClient({
                         <label
                           key={slot.id}
                           className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-xs transition ${alreadyLocked
-                              ? 'border-slate-200 bg-slate-100 text-slate-500'
-                              : checked
-                                ? 'border-emerald-400 bg-emerald-50/80 text-slate-900'
-                                : 'border-slate-200 bg-white text-slate-700'
+                            ? 'border-slate-200 bg-slate-100 text-slate-500'
+                            : checked
+                              ? 'border-emerald-400 bg-emerald-50/80 text-slate-900'
+                              : 'border-slate-200 bg-white text-slate-700'
                             }`}
                         >
                           <div className="flex items-center gap-2.5">
@@ -1124,6 +1148,7 @@ export function GateScannerClient({
           </div>
         </div>
       )}
+
     </div>
   )
 }
