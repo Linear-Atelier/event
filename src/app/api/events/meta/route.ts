@@ -60,17 +60,44 @@ export async function GET(request: Request) {
     const activeBookingIds = activeBookings.map((b) => b.id)
     const bookingById = new Map<number, Booking>(activeBookings.map((b) => [b.id, b]))
 
-    const bookingTablesRes =
+    const [bookingTablesRes, existingSlotsRes] =
       activeBookingIds.length > 0
-        ? await payload.find({
-            collection: 'booking-tables',
-            user,
-            overrideAccess: false,
-            where: { booking: { in: activeBookingIds } },
-            limit: 5000,
-            depth: 0,
-          })
-        : { docs: [] }
+        ? await Promise.all([
+            payload.find({
+              collection: 'booking-tables',
+              user,
+              overrideAccess: false,
+              where: { booking: { in: activeBookingIds } },
+              limit: 5000,
+              depth: 0,
+            }),
+            payload.find({
+              collection: 'ticket-checkin-slots',
+              user,
+              overrideAccess: false,
+              where: { booking: { in: activeBookingIds } },
+              limit: 10000,
+              depth: 0,
+            }),
+          ])
+        : [{ docs: [] }, { docs: [] }]
+
+    const bookedAttendees = existingSlotsRes.docs.map((slot) => {
+      const bId = typeof slot.booking === 'object' ? slot.booking.id : slot.booking
+      const bObj = bookingById.get(bId)
+      const mId =
+        slot.member && typeof slot.member === 'object'
+          ? Number(slot.member.id)
+          : slot.member
+            ? Number(slot.member)
+            : null
+      const name = (slot.attendeeName || slot.label.split(' — ')[0] || '').trim()
+      return {
+        memberId: mId,
+        name,
+        bookingCode: bObj?.bookingCode || '',
+      }
+    })
 
     // Map each reserved tableLabel -> reserving booking info (non-sharing)
     const reservedByLabel = new Map<
@@ -154,6 +181,7 @@ export async function GET(request: Request) {
         }
       }),
       activeBookingCount: activeBookings.length,
+      bookedAttendees,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to load event metadata'

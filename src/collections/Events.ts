@@ -3,6 +3,23 @@ import { fieldNeverReadable, isAuthenticated, isSuperAdmin } from '../access/rol
 import { generateEventKeyPair } from '../lib/crypto'
 import { EVENT_COLOR_OPTIONS } from '../lib/event-colors'
 
+async function fetchIconifySvg(iconId: string): Promise<string | null> {
+  const clean = iconId.trim()
+  if (!/^[a-z0-9-]+:[a-z0-9-]+$/i.test(clean)) return null
+  const [prefix, name] = clean.split(':')
+  try {
+    const res = await fetch(
+      `https://api.iconify.design/${encodeURIComponent(prefix)}/${encodeURIComponent(name)}.svg?width=28&height=28`,
+    )
+    if (!res.ok) return null
+    const raw = (await res.text()).trim()
+    if (!raw.startsWith('<svg')) return null
+    return raw.replace(/<script[\s\S]*?<\/script>/gi, '')
+  } catch {
+    return null
+  }
+}
+
 export const Events: CollectionConfig = {
   slug: 'events',
   admin: {
@@ -17,12 +34,26 @@ export const Events: CollectionConfig = {
   },
   hooks: {
     beforeChange: [
-      async ({ data, operation }) => {
+      async ({ data, operation, originalDoc }) => {
         if (operation === 'create' && (!data.publicKey || !data.privateKeyEnc)) {
           const { publicKeyHex, privateKeyEnc } = await generateEventKeyPair()
           data.publicKey = publicKeyHex
           data.privateKeyEnc = privateKeyEnc
         }
+
+        if (typeof data.icon === 'string') {
+          const nextIcon = data.icon.trim()
+          const prevIcon = (originalDoc?.icon as string | undefined)?.trim() || ''
+          if (!nextIcon) {
+            data.iconSvg = ''
+          } else if (nextIcon !== prevIcon || !originalDoc?.iconSvg) {
+            const svg = await fetchIconifySvg(nextIcon)
+            if (svg) {
+              data.iconSvg = svg
+            }
+          }
+        }
+
         return data
       },
     ],
@@ -64,6 +95,24 @@ export const Events: CollectionConfig = {
       admin: {
         position: 'sidebar',
         description: 'Pick an accent color for this event card and badges across the portal.',
+      },
+    },
+    {
+      name: 'icon',
+      type: 'text',
+      label: 'Event Icon (Iconify)',
+      admin: {
+        position: 'sidebar',
+        components: {
+          Field: '/components/admin/IconifyPickerField#IconifyPickerField',
+        },
+      },
+    },
+    {
+      name: 'iconSvg',
+      type: 'text',
+      admin: {
+        hidden: true,
       },
     },
     {

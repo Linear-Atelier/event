@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#0f172a',
+  themeColor: '#0a0a0a',
   width: 'device-width',
   initialScale: 1,
 }
@@ -30,11 +30,11 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
 
   return (
     <html lang="en" className={nunitoSans.variable}>
-      <body className="min-h-screen bg-white font-sans text-slate-900 antialiased">
+      <body className="min-h-screen bg-white font-sans text-neutral-900 antialiased">
         {user ? (
           <div className="flex min-h-screen flex-col">
             <AppNavbar user={user} />
-            <div className="flex-1 pb-24">{children}</div>
+            {children}
           </div>
         ) : (
           children

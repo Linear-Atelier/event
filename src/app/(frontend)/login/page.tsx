@@ -124,25 +124,25 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Brand Header */}
         <div className="flex flex-col items-center gap-3.5">
-          <Image src="/images/AIAIA Logo.png" alt="logo" width={60} height={60} />
+          <Image src="/AIAIA Logo.png" alt="logo" width={60} height={60} />
           <div className='flex flex-col items-center'>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-sky-800">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-800">
               AIAIA Cochin Branch
             </p>
-            <h1 className="text-xl font-extrabold tracking-tight text-sky-800">
+            <h1 className="text-xl font-extrabold tracking-tight text-neutral-800">
               Committee Portal
             </h1>
           </div>
         </div>
 
         {/* Soft Pill Mode Switcher */}
-        <div className="mt-6 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100/90 p-1">
+        <div className="mt-6 grid grid-cols-2 gap-1 rounded-2xl bg-neutral-100/90 p-1">
           <button
             type="button"
             onClick={() => switchMode('otp')}
             className={`rounded-xl py-2 text-xs font-bold transition ${mode === 'otp'
-              ? 'bg-white text-slate-950 shadow-xs'
-              : 'text-slate-500 hover:text-slate-800'
+              ? 'bg-white text-neutral-950 shadow-xs'
+              : 'text-neutral-500 hover:text-neutral-800'
               }`}
           >
             Email OTP
@@ -151,8 +151,8 @@ export default function LoginPage() {
             type="button"
             onClick={() => switchMode('password')}
             className={`rounded-xl py-2 text-xs font-bold transition ${mode === 'password'
-              ? 'bg-white text-slate-950 shadow-xs'
-              : 'text-slate-500 hover:text-slate-800'
+              ? 'bg-white text-neutral-950 shadow-xs'
+              : 'text-neutral-500 hover:text-neutral-800'
               }`}
           >
             Password
@@ -169,11 +169,11 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-slate-700">
+              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
                 Committee Email
               </label>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                <Mail className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-neutral-400" />
                 <input
                   type="email"
                   required
@@ -181,17 +181,17 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="officer@aiaiacochin.org"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-2.5 pl-10 pr-4 text-sm text-slate-950 placeholder-slate-400 transition focus:border-slate-900 focus:bg-white focus:outline-none"
+                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-2.5 pl-10 pr-4 text-sm text-neutral-950 placeholder-neutral-400 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
                 />
               </div>
             </div>
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-slate-700">
+              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
                 Password
               </label>
               <div className="relative">
-                <Lock className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                <Lock className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-neutral-400" />
                 <input
                   type="password"
                   required
@@ -199,7 +199,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-2.5 pl-10 pr-4 text-sm text-slate-950 placeholder-slate-400 transition focus:border-slate-900 focus:bg-white focus:outline-none"
+                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-2.5 pl-10 pr-4 text-sm text-neutral-950 placeholder-neutral-400 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
                 />
               </div>
             </div>
@@ -207,7 +207,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-slate-800 active:scale-[0.99] disabled:opacity-50"
+              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-neutral-800 active:scale-[0.99] disabled:opacity-50"
             >
               {loading ? 'Signing in…' : 'Sign In'}
               {!loading && <ArrowRight className="h-4 w-4" />}
@@ -225,11 +225,11 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-slate-700">
+              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
                 Committee Email
               </label>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                <Mail className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-neutral-400" />
                 <input
                   type="email"
                   required
@@ -237,7 +237,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="officer@aiaiacochin.org"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-2.5 pl-10 pr-4 text-sm text-slate-950 placeholder-slate-400 transition focus:border-slate-900 focus:bg-white focus:outline-none"
+                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-2.5 pl-10 pr-4 text-sm text-neutral-950 placeholder-neutral-400 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
                 />
               </div>
             </div>
@@ -245,7 +245,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-slate-800 active:scale-[0.99] disabled:opacity-50"
+              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-neutral-800 active:scale-[0.99] disabled:opacity-50"
             >
               {loading ? 'Sending code…' : 'Send 6-Digit Code'}
               {!loading && <ArrowRight className="h-4 w-4" />}
@@ -262,7 +262,7 @@ export default function LoginPage() {
             )}
 
             {info && (
-              <div className="flex items-center justify-between gap-2 rounded-2xl bg-sky-50 px-4 py-3 text-xs font-medium text-sky-900">
+              <div className="flex items-center justify-between gap-2 rounded-2xl bg-neutral-100 px-4 py-3 text-xs font-medium text-neutral-900">
                 <span>{info}</span>
                 <button
                   type="button"
@@ -272,7 +272,7 @@ export default function LoginPage() {
                     setError(null)
                     setInfo(null)
                   }}
-                  className="shrink-0 font-bold text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                  className="shrink-0 font-bold text-neutral-900 underline underline-offset-2 hover:text-neutral-900"
                 >
                   Change
                 </button>
@@ -280,11 +280,11 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-slate-700">
+              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
                 6-Digit Verification Code
               </label>
               <div className="relative">
-                <KeyRound className="pointer-events-none absolute left-3.5 top-4.5 h-4 w-4 text-slate-400" />
+                <KeyRound className="pointer-events-none absolute left-3.5 top-4.5 h-4 w-4 text-neutral-400" />
                 <input
                   type="text"
                   inputMode="numeric"
@@ -296,7 +296,7 @@ export default function LoginPage() {
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   placeholder="000000"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3 pl-10 pr-4 text-center text-lg font-extrabold tracking-[0.35em] text-slate-950 placeholder-slate-300 transition focus:border-slate-900 focus:bg-white focus:outline-none"
+                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-3 pl-10 pr-4 text-center text-lg font-extrabold tracking-[0.35em] text-neutral-950 placeholder-neutral-300 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
                 />
               </div>
             </div>
@@ -304,7 +304,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading || otpCode.length !== 6}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-slate-800 active:scale-[0.99] disabled:opacity-50"
+              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-neutral-800 active:scale-[0.99] disabled:opacity-50"
             >
               {loading ? 'Verifying…' : 'Verify & Sign In'}
               {!loading && <ArrowRight className="h-4 w-4" />}
@@ -314,7 +314,7 @@ export default function LoginPage() {
               type="button"
               disabled={loading || resendCooldown > 0}
               onClick={requestOtpCode}
-              className="inline-flex w-full items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-slate-500 transition hover:text-slate-900 disabled:opacity-50"
+              className="inline-flex w-full items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:text-neutral-900 disabled:opacity-50"
             >
               <RotateCw className="h-3.5 w-3.5" />
               {resendCooldown > 0
@@ -324,8 +324,8 @@ export default function LoginPage() {
           </form>
         )}
 
-        <div className="ticket-perforation mt-8 flex flex-col pt-5 text-center text-sm font-medium text-slate-400">
-          <span className="font-bold text-slate-600">Linear Atelier | Ticketing Partner</span>
+        <div className="ticket-perforation mt-8 flex flex-col pt-5 text-center text-sm font-medium text-neutral-400">
+          <span className="font-bold text-neutral-600">Linear Atelier | Ticketing Partner</span>
         </div>
       </div>
     </div>

@@ -209,43 +209,43 @@ export function EventDashboardClient({
   return (
     <div className="space-y-6">
       {/* Clean White Borderless Header */}
-      <div className="flex flex-col justify-between gap-4 border-b border-dashed border-slate-200 pb-5 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-4 border-b border-dashed border-neutral-200 pb-5 sm:flex-row sm:items-center">
         <div>
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-800">
+            <span className="rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-bold text-neutral-800">
               {event.code}
             </span>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-neutral-500">
               {new Date(event.date).toLocaleString('en-IN', {
                 dateStyle: 'medium',
                 timeStyle: 'short',
               })}
             </span>
           </div>
-          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-950">
+          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-neutral-950">
             {event.name}
           </h1>
-          <p className="text-sm text-slate-500">{event.venue}</p>
+          <p className="text-sm text-neutral-500">{event.venue}</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Link
             href={`/desk?eventId=${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-2xl bg-sky-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-sky-700"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-neutral-900 px-4 py-2 text-xs font-bold text-white transition hover:bg-neutral-800"
           >
             <Ticket className="h-4 w-4" />
             New Booking
           </Link>
           <Link
             href={`/finance?eventId=${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-2xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-200"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-neutral-100 px-4 py-2 text-xs font-bold text-neutral-700 transition hover:bg-neutral-200"
           >
             <CreditCard className="h-4 w-4" />
             Finance
           </Link>
           <Link
             href={`/scan?eventId=${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-2xl bg-slate-950 px-4 py-2 text-xs font-bold text-white transition hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-neutral-950 px-4 py-2 text-xs font-bold text-white transition hover:bg-neutral-800"
           >
             <QrCode className="h-4 w-4" />
             Gate Scan
@@ -254,7 +254,7 @@ export function EventDashboardClient({
       </div>
 
       {toast && (
-        <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs font-medium text-sky-900">
+        <div className="flex items-center justify-between rounded-lg border border-neutral-200 bg-neutral-100 px-4 py-2.5 text-xs font-medium text-neutral-900">
           <span>{toast}</span>
           <button type="button" onClick={() => setToast(null)}>
             <X className="h-4 w-4" />
@@ -263,7 +263,7 @@ export function EventDashboardClient({
       )}
 
       {/* Soft Pill Tabs (White App Style) */}
-      <div className="flex gap-1 overflow-x-auto rounded-2xl bg-slate-100/90 p-1">
+      <div className="flex gap-1 overflow-x-auto rounded-2xl bg-neutral-100/90 p-1">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const active = activeTab === tab.key
@@ -274,8 +274,8 @@ export function EventDashboardClient({
               onClick={() => setActiveTab(tab.key)}
               className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition ${
                 active
-                  ? 'bg-white text-slate-950 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-500 hover:text-neutral-900'
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -290,27 +290,27 @@ export function EventDashboardClient({
         <div className="space-y-6">
           <div className="glass-surface grid gap-5 rounded-3xl p-5 text-white shadow-xl sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
                 Confirmed Bookings
               </div>
               <div className="mt-1 text-2xl font-extrabold text-white">
                 {activeBookings.length}
               </div>
-              <div className="mt-1 text-xs text-slate-400">
+              <div className="mt-1 text-xs text-neutral-400">
                 {totalPax} total guests (pax)
               </div>
             </div>
 
             <div className="sm:border-l sm:border-white/10 sm:pl-5">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-white">
                 Live Gate Attendance
               </div>
-              <div className="mt-1 text-2xl font-extrabold text-sky-300">
+              <div className="mt-1 text-2xl font-extrabold text-white">
                 {checkedInSlots} / {totalSlots}
               </div>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="h-full rounded-full bg-sky-400 transition-all"
+                  className="h-full rounded-full bg-white transition-all"
                   style={{ width: `${attendancePct}%` }}
                 />
               </div>
@@ -323,19 +323,19 @@ export function EventDashboardClient({
               <div className="mt-1 text-2xl font-extrabold text-emerald-300">
                 ₹{totalRevenue.toLocaleString('en-IN')}
               </div>
-              <div className="mt-1 text-xs text-slate-400">
+              <div className="mt-1 text-xs text-neutral-400">
                 ₹{verifiedRevenue.toLocaleString('en-IN')} received by treasurer
               </div>
             </div>
 
             <div className="sm:border-l sm:border-white/10 sm:pl-5">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
                 Table Utilization
               </div>
               <div className="mt-1 text-2xl font-extrabold text-white">
                 {totalSeatsAllocated} / {totalTableCapacity}
               </div>
-              <div className="mt-1 text-xs text-slate-400">
+              <div className="mt-1 text-xs text-neutral-400">
                 across {tables.length} tables
               </div>
             </div>
@@ -367,20 +367,20 @@ export function EventDashboardClient({
         <div className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative flex-1 max-w-md">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search B042, B042-T01, holder name, or phone..."
-                className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm focus:border-sky-500 focus:outline-none"
+                className="w-full rounded-lg border border-neutral-300 bg-white py-2 pl-9 pr-3 text-sm focus:border-neutral-900 focus:outline-none"
               />
             </div>
 
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700"
+              className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-700"
             >
               <option value="all">All Statuses</option>
               <option value="confirmed">Confirmed</option>
@@ -390,8 +390,8 @@ export function EventDashboardClient({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-              <thead className="border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
+              <thead className="border-b border-neutral-200 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
                 <tr>
                   <th className="px-4 py-3">Booking</th>
                   <th className="px-4 py-3">Holder</th>
@@ -402,21 +402,21 @@ export function EventDashboardClient({
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-neutral-100">
                 {filteredBookings.map((b) => (
                   <tr key={b.id} className={b.status === 'cancelled' ? 'bg-rose-50/40 opacity-75' : ''}>
                     <td className="px-4 py-3">
-                      <div className="font-bold text-slate-900">{b.bookingCode}</div>
-                      <div className="mt-0.5 text-[11px] text-slate-500">
+                      <div className="font-bold text-neutral-900">{b.bookingCode}</div>
+                      <div className="mt-0.5 text-[11px] text-neutral-500">
                         {b.ticketCodes.join(', ')}
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900">{b.holderName}</div>
-                      <div className="text-[11px] text-slate-500">{b.phone}</div>
+                      <div className="font-medium text-neutral-900">{b.holderName}</div>
+                      <div className="text-[11px] text-neutral-500">{b.phone}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-900">
+                      <div className="font-semibold text-neutral-900">
                         {b.checkedInPax} / {b.totalPax} in
                       </div>
                       <span
@@ -432,7 +432,7 @@ export function EventDashboardClient({
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-slate-800">{b.tablesSummary}</div>
+                      <div className="text-neutral-800">{b.tablesSummary}</div>
                       {b.allocatedSeats > 0 && b.allocatedSeats < b.totalPax && (
                         <span className="text-[10px] font-semibold text-amber-700">
                           Under-allocated ({b.allocatedSeats}/{b.totalPax})
@@ -440,10 +440,10 @@ export function EventDashboardClient({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-bold text-slate-900">
+                      <div className="font-bold text-neutral-900">
                         ₹{b.totalAmount.toLocaleString('en-IN')}
                       </div>
-                      <div className="text-[11px] text-slate-500">
+                      <div className="text-[11px] text-neutral-500">
                         {b.paymentMode} · {b.collectedByName}
                       </div>
                       {b.treasurerVerified ? (
@@ -457,7 +457,7 @@ export function EventDashboardClient({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[11px] text-slate-600">
+                      <span className="text-[11px] text-neutral-600">
                         {b.physicalIssuedCount}/{b.totalTicketCount} issued
                       </span>
                     </td>
@@ -466,7 +466,7 @@ export function EventDashboardClient({
                         <button
                           type="button"
                           onClick={() => setQrModalBooking(b)}
-                          className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                          className="rounded border border-neutral-300 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 hover:bg-neutral-50"
                         >
                           QR
                         </button>
@@ -474,7 +474,7 @@ export function EventDashboardClient({
                           type="button"
                           disabled={resendingId === b.id}
                           onClick={() => handleResend(b.id)}
-                          className="inline-flex items-center gap-1 rounded bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50"
+                          className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-[11px] font-medium text-neutral-900 hover:bg-neutral-200/80 disabled:opacity-50"
                         >
                           <Send className="h-3 w-3" />
                           {resendingId === b.id ? '...' : 'Resend'}
@@ -485,7 +485,7 @@ export function EventDashboardClient({
                 ))}
                 {filteredBookings.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-neutral-500">
                       No matching bookings found.
                     </td>
                   </tr>
@@ -498,6 +498,17 @@ export function EventDashboardClient({
 
       {/* SEATING TAB */}
       {activeTab === 'seating' && (
+        tables.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-neutral-200 bg-neutral-50/70 px-6 py-14 text-center">
+            <Users className="mx-auto h-8 w-8 text-neutral-300" />
+            <p className="mt-2.5 text-sm font-bold text-neutral-700">
+              No tables configured for this event
+            </p>
+            <p className="mt-1 text-xs text-neutral-500">
+              Add table groups in Payload Admin (`/admin`) to start assigning seats.
+            </p>
+          </div>
+        ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {tables.map((t) => {
             const pct = Math.min(100, Math.round((t.occupiedSeats / t.maxCapacity) * 100))
@@ -506,27 +517,27 @@ export function EventDashboardClient({
               <div
                 key={t.id}
                 className={`rounded-2xl p-4 ${
-                  isFull ? 'bg-emerald-50/60 ring-1 ring-emerald-200/80' : 'bg-slate-50/80'
+                  isFull ? 'bg-emerald-50/60 ring-1 ring-emerald-200/80' : 'bg-neutral-50/80'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-base font-bold text-slate-900">{t.tableLabel}</span>
+                    <span className="text-base font-bold text-neutral-900">{t.tableLabel}</span>
                     {t.tableTypeName && (
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                      <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-700">
                         {t.tableTypeName}
                       </span>
                     )}
                   </div>
-                  <span className="text-xs font-semibold text-slate-600">
+                  <span className="text-xs font-semibold text-neutral-600">
                     {isFull ? 'Reserved' : 'Available'} · {t.maxCapacity} seats
                   </span>
                 </div>
 
-                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-100">
                   <div
                     className={`h-full rounded-full ${
-                      isFull ? 'bg-emerald-500' : 'bg-sky-500'
+                      isFull ? 'bg-emerald-500' : 'bg-neutral-900'
                     }`}
                     style={{ width: `${pct}%` }}
                   />
@@ -534,17 +545,17 @@ export function EventDashboardClient({
 
                 <div className="mt-3 space-y-1.5">
                   {t.allocations.length === 0 ? (
-                    <div className="text-xs italic text-slate-400">Available — no seats assigned</div>
+                    <div className="text-xs italic text-neutral-400">Available — no seats assigned</div>
                   ) : (
                     t.allocations.map((a, idx) => (
                       <div
                         key={idx}
-                        className="flex items-center justify-between rounded bg-slate-50 px-2.5 py-1.5 text-xs"
+                        className="flex items-center justify-between rounded bg-neutral-50 px-2.5 py-1.5 text-xs"
                       >
-                        <span className="font-medium text-slate-800">
+                        <span className="font-medium text-neutral-800">
                           {a.bookingCode} · {a.holderName}
                         </span>
-                        <span className="font-semibold text-slate-600">{a.allocatedSeats}p</span>
+                        <span className="font-semibold text-neutral-600">{a.allocatedSeats}p</span>
                       </div>
                     ))
                   )}
@@ -553,6 +564,7 @@ export function EventDashboardClient({
             )
           })}
         </div>
+        )
       )}
 
       {/* TREASURER SUMMARY TAB */}
@@ -560,9 +572,9 @@ export function EventDashboardClient({
         <div className="space-y-6">
           <div className="grid gap-8 md:grid-cols-2">
             <div>
-              <h3 className="text-sm font-bold text-slate-900">By Payment Mode</h3>
+              <h3 className="text-sm font-bold text-neutral-900">By Payment Mode</h3>
               <table className="mt-3 w-full text-left text-xs">
-                <thead className="border-b border-slate-200 text-slate-400">
+                <thead className="border-b border-neutral-200 text-neutral-400">
                   <tr>
                     <th className="py-2">Mode</th>
                     <th className="py-2">Bookings</th>
@@ -570,7 +582,7 @@ export function EventDashboardClient({
                     <th className="py-2">Received</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-neutral-100">
                   {modeSummary.map((m) => (
                     <tr key={m.paymentMode}>
                       <td className="py-2.5 font-semibold">{m.paymentMode}</td>
@@ -588,9 +600,9 @@ export function EventDashboardClient({
             </div>
 
             <div className="ticket-perforation pt-6 md:border-t-0 md:pt-0">
-              <h3 className="text-sm font-bold text-slate-900">Officer Cash Reconciliation</h3>
+              <h3 className="text-sm font-bold text-neutral-900">Officer Cash Reconciliation</h3>
               <table className="mt-3 w-full text-left text-xs">
-                <thead className="border-b border-slate-200 text-slate-400">
+                <thead className="border-b border-neutral-200 text-neutral-400">
                   <tr>
                     <th className="py-2">Officer</th>
                     <th className="py-2">Cash</th>
@@ -599,7 +611,7 @@ export function EventDashboardClient({
                     <th className="py-2">Pending</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-neutral-100">
                   {officerSummary.map((o, idx) => (
                     <tr key={idx}>
                       <td className="py-2.5 font-semibold">{o.officerName}</td>
@@ -621,19 +633,19 @@ export function EventDashboardClient({
       {/* LIVE ATTENDANCE TAB */}
       {activeTab === 'attendance' && (
         <div className="space-y-5">
-          <div className="flex items-center justify-between border-b border-dashed border-slate-200 pb-4">
+          <div className="flex items-center justify-between border-b border-dashed border-neutral-200 pb-4">
             <div>
-              <div className="text-base font-bold text-slate-950">
+              <div className="text-base font-bold text-neutral-950">
                 {checkedInSlots} of {totalSlots} guests checked in ({attendancePct}%)
               </div>
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-neutral-500">
                 {totalSlots - checkedInSlots} pending arrival
               </div>
             </div>
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-1.5 rounded-2xl bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-200"
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-neutral-100 px-3.5 py-2 text-xs font-bold text-neutral-700 transition hover:bg-neutral-200"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Refresh
@@ -641,8 +653,8 @@ export function EventDashboardClient({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-              <thead className="border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-400">
+            <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
+              <thead className="border-b border-neutral-200 text-[11px] font-semibold uppercase text-neutral-400">
                 <tr>
                   <th className="px-4 py-3">Time</th>
                   <th className="px-4 py-3">Booking</th>
@@ -651,24 +663,24 @@ export function EventDashboardClient({
                   <th className="px-4 py-3">Method</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-neutral-100">
                 {recentCheckins.map((c) => (
                   <tr key={c.id}>
-                    <td className="px-4 py-2.5 text-slate-600">
+                    <td className="px-4 py-2.5 text-neutral-600">
                       {new Date(c.checkedInAt).toLocaleTimeString('en-IN', {
                         hour: '2-digit',
                         minute: '2-digit',
                       })}
                     </td>
-                    <td className="px-4 py-2.5 font-semibold text-slate-900">
+                    <td className="px-4 py-2.5 font-semibold text-neutral-900">
                       {c.bookingCode} · {c.holderName}
                     </td>
-                    <td className="px-4 py-2.5 text-slate-700">{c.label}</td>
-                    <td className="px-4 py-2.5 text-slate-600">
+                    <td className="px-4 py-2.5 text-neutral-700">{c.label}</td>
+                    <td className="px-4 py-2.5 text-neutral-600">
                       {c.checkedInByName} ({c.deviceId})
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-700">
+                      <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-neutral-700">
                         {c.method}
                       </span>
                     </td>
@@ -676,7 +688,7 @@ export function EventDashboardClient({
                 ))}
                 {recentCheckins.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={5} className="px-4 py-8 text-center text-neutral-500">
                       No check-ins recorded yet.
                     </td>
                   </tr>
@@ -689,10 +701,10 @@ export function EventDashboardClient({
 
       {/* QR PREVIEW MODAL (Dark Frosted Glass Ticket Pass) */}
       {qrModalBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/75 p-4 backdrop-blur-sm">
           <div className="glass-surface w-full max-w-sm rounded-3xl p-6 text-center text-white shadow-2xl">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-widest text-sky-300">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-white">
                 Scan QR Code
               </span>
               <button
@@ -708,10 +720,10 @@ export function EventDashboardClient({
               <h3 className="text-xl font-extrabold tracking-tight text-white">
                 {event.name}
               </h3>
-              <p className="mt-1 text-xs text-slate-300/80">
+              <p className="mt-1 text-xs text-neutral-300/80">
                 Show this QR code at the event entrance
               </p>
-              <p className="mt-1 text-xs font-semibold text-slate-200">
+              <p className="mt-1 text-xs font-semibold text-neutral-200">
                 Ticket: {qrModalBooking.bookingCode} · {qrModalBooking.holderName} ({qrModalBooking.totalPax} Pax)
               </p>
             </div>
@@ -725,27 +737,27 @@ export function EventDashboardClient({
               />
             </div>
 
-            <div className="mt-4 rounded-2xl bg-white p-3.5 text-left text-xs text-slate-800">
+            <div className="mt-4 rounded-2xl bg-white p-3.5 text-left text-xs text-neutral-800">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-[10px] text-slate-400">Seat / Table Info</div>
-                  <div className="font-bold text-slate-900">
+                  <div className="text-[10px] text-neutral-400">Seat / Table Info</div>
+                  <div className="font-bold text-neutral-900">
                     {qrModalBooking.tablesSummary}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-[10px] text-slate-400">Amount</div>
+                  <div className="text-[10px] text-neutral-400">Amount</div>
                   <div className="font-bold text-emerald-700">
                     ₹{qrModalBooking.totalAmount.toLocaleString('en-IN')}
                   </div>
                 </div>
               </div>
-              <div className="mt-2 border-t border-dashed border-slate-200 pt-2 text-[11px] text-slate-500">
+              <div className="mt-2 border-t border-dashed border-neutral-200 pt-2 text-[11px] text-neutral-500">
                 Tickets: {qrModalBooking.ticketCodes.join(', ')}
               </div>
             </div>
 
-            <div className="mt-3 text-[10px] text-slate-400">
+            <div className="mt-3 text-[10px] text-neutral-400">
               Linear Atelier · Ticketing Partner
             </div>
           </div>

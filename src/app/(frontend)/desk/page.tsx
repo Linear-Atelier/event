@@ -20,7 +20,7 @@ export default async function BookingDeskPage(props: {
     collection: 'events',
     user,
     overrideAccess: false,
-    sort: '-date',
+    sort: 'date',
     limit: 50,
     depth: 0,
   })
@@ -31,9 +31,8 @@ export default async function BookingDeskPage(props: {
     collection: 'bookings',
     user,
     overrideAccess: false,
-    where: initialEventId ? { event: { equals: initialEventId } } : undefined,
     sort: '-createdAt',
-    limit: 50,
+    limit: 500,
     depth: 0,
   })
 
@@ -117,6 +116,7 @@ export default async function BookingDeskPage(props: {
           canCreate={canCreate}
           recentBookings={recentBookingsRes.docs.map((b) => ({
             id: b.id,
+            eventId: typeof b.event === 'object' ? b.event.id : b.event,
             bookingCode: b.bookingCode,
             holderName: b.holderName,
             phone: b.phone,

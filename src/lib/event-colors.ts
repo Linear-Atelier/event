@@ -1,7 +1,7 @@
 export type EventColorKey =
   | 'sky'
   | 'emerald'
-  | 'rose'
+  | 'red'
   | 'amber'
   | 'indigo'
   | 'violet'
@@ -52,19 +52,19 @@ export const EVENT_COLOR_THEMES: Record<EventColorKey, EventColorTheme> = {
     glassGlow: 'bg-emerald-500/20',
     glassAccentText: 'text-emerald-300',
   },
-  rose: {
-    key: 'rose',
-    label: 'Crimson Rose',
-    hex: '#e11d48',
-    cardBg: 'bg-rose-50/60',
-    cardBorder: 'border-rose-200/80',
-    badgeBg: 'bg-rose-100',
-    badgeText: 'text-rose-800',
-    accentText: 'text-rose-700',
-    iconText: 'text-rose-600',
-    dotBg: 'bg-rose-500',
-    glassGlow: 'bg-rose-500/20',
-    glassAccentText: 'text-rose-300',
+  red: {
+    key: 'red',
+    label: 'Crimson Red',
+    hex: '#e11d1dff',
+    cardBg: 'bg-red-50/60',
+    cardBorder: 'border-red-200/80',
+    badgeBg: 'bg-red-100',
+    badgeText: 'text-red-800',
+    accentText: 'text-red-700',
+    iconText: 'text-red-600',
+    dotBg: 'bg-red-500',
+    glassGlow: 'bg-red-500/20',
+    glassAccentText: 'text-red-300',
   },
   amber: {
     key: 'amber',
@@ -144,6 +144,7 @@ export const EVENT_COLOR_OPTIONS = Object.values(EVENT_COLOR_THEMES).map((t) => 
 }))
 
 export function getEventColorTheme(color?: string | null): EventColorTheme {
+  if (color === 'rose') return EVENT_COLOR_THEMES.red
   if (color && color in EVENT_COLOR_THEMES) {
     return EVENT_COLOR_THEMES[color as EventColorKey]
   }

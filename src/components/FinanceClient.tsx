@@ -291,10 +291,10 @@ export function FinanceClient({
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-2xl font-bold text-neutral-900">
             Treasurer Finance &amp; Handover Tracking
           </h1>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-neutral-600">
             Track collected funds from Booking Officers to Treasurer receipt, plus AGM Excel/PDF exports.
           </p>
         </div>
@@ -303,7 +303,7 @@ export function FinanceClient({
           <select
             value={selectedEventId}
             onChange={(e) => setSelectedEventId(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-800"
           >
             <option value="all">All Events</option>
             {events.map((ev) => (
@@ -324,7 +324,7 @@ export function FinanceClient({
           <button
             type="button"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50"
           >
             <Printer className="h-4 w-4" />
             Print / Save PDF
@@ -336,11 +336,11 @@ export function FinanceClient({
       <div className="glass-surface rounded-3xl p-5 text-white shadow-xl">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div>
-            <div className="text-[11px] font-medium text-slate-300">Gross Revenue</div>
+            <div className="text-[11px] font-medium text-neutral-300">Gross Revenue</div>
             <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
               ₹{totals.gross.toLocaleString('en-IN')}
             </div>
-            <div className="mt-0.5 text-[11px] text-slate-400">
+            <div className="mt-0.5 text-[11px] text-neutral-400">
               {totals.count} active bookings
             </div>
           </div>
@@ -350,17 +350,17 @@ export function FinanceClient({
             <div className="mt-1 text-2xl font-extrabold tracking-tight text-amber-300">
               ₹{totals.withOfficer.toLocaleString('en-IN')}
             </div>
-            <div className="mt-0.5 text-[11px] text-slate-300">
+            <div className="mt-0.5 text-[11px] text-neutral-300">
               {totals.withOfficerCount} not yet transferred
             </div>
           </div>
 
           <div>
-            <div className="text-[11px] font-medium text-sky-300">Sent to Treasurer</div>
-            <div className="mt-1 text-2xl font-extrabold tracking-tight text-sky-300">
+            <div className="text-[11px] font-medium text-white">Sent to Treasurer</div>
+            <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
               ₹{totals.transferred.toLocaleString('en-IN')}
             </div>
-            <div className="mt-0.5 text-[11px] text-slate-300">
+            <div className="mt-0.5 text-[11px] text-neutral-300">
               {totals.transferredCount} awaiting receipt
             </div>
           </div>
@@ -372,7 +372,7 @@ export function FinanceClient({
             <div className="mt-1 text-2xl font-extrabold tracking-tight text-emerald-300">
               ₹{totals.received.toLocaleString('en-IN')}
             </div>
-            <div className="mt-0.5 text-[11px] text-slate-300">
+            <div className="mt-0.5 text-[11px] text-neutral-300">
               {totals.receivedCount} settled
             </div>
           </div>
@@ -382,12 +382,12 @@ export function FinanceClient({
       {/* Officer Cash Reconciliation & Payment Modes (Borderless White Sections) */}
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <h2 className="text-sm font-bold text-slate-900">
+          <h2 className="text-sm font-bold text-neutral-900">
             Officer-Wise Cash &amp; UPI Reconciliation
           </h2>
           <div className="mt-3 overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-              <thead className="bg-slate-50 text-[11px] font-semibold uppercase text-slate-500">
+            <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
+              <thead className="bg-neutral-50 text-[11px] font-semibold uppercase text-neutral-500">
                 <tr>
                   <th className="px-3 py-2">Officer</th>
                   <th className="px-3 py-2">Bookings</th>
@@ -395,16 +395,16 @@ export function FinanceClient({
                   <th className="px-3 py-2">Treasurer Handover</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-neutral-100">
                 {officerRows.map((o, idx) => (
                   <tr key={idx} className="align-top">
-                    <td className="px-3 py-2.5 font-semibold text-slate-900">{o.officerName}</td>
+                    <td className="px-3 py-2.5 font-semibold text-neutral-900">{o.officerName}</td>
                     <td className="px-3 py-2.5">{o.bookingCount}</td>
                     <td className="px-3 py-2.5">
-                      <div className="font-bold text-slate-900">
+                      <div className="font-bold text-neutral-900">
                         ₹{o.totalAmount.toLocaleString('en-IN')}
                       </div>
-                      <div className="mt-0.5 space-y-0.5 text-[11px] text-slate-500">
+                      <div className="mt-0.5 space-y-0.5 text-[11px] text-neutral-500">
                         <div>Cash: ₹{o.cashAmount.toLocaleString('en-IN')}</div>
                         <div>UPI: ₹{o.upiAmount.toLocaleString('en-IN')}</div>
                         <div>Door: ₹{o.doorAmount.toLocaleString('en-IN')}</div>
@@ -415,7 +415,7 @@ export function FinanceClient({
                         Received: ₹{o.receivedAmount.toLocaleString('en-IN')}
                       </div>
                       <div className="mt-0.5 space-y-0.5 text-[11px]">
-                        <div className="text-sky-700">
+                        <div className="text-neutral-900">
                           Sent: ₹{o.transferredAmount.toLocaleString('en-IN')}
                         </div>
                         <div className="text-amber-700">
@@ -427,7 +427,7 @@ export function FinanceClient({
                 ))}
                 {officerRows.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
+                    <td colSpan={4} className="px-3 py-6 text-center text-neutral-400">
                       No collections recorded yet.
                     </td>
                   </tr>
@@ -438,21 +438,21 @@ export function FinanceClient({
         </div>
 
         <div className="ticket-perforation pt-6 lg:border-t-0 lg:pt-0">
-          <h2 className="text-sm font-bold text-slate-900">Payment Mode Breakdown</h2>
+          <h2 className="text-sm font-bold text-neutral-900">Payment Mode Breakdown</h2>
           <div className="mt-3 space-y-2.5">
             {modeRows.map((m) => (
               <div
                 key={m.paymentMode}
-                className="flex items-center justify-between rounded-2xl bg-slate-50/80 px-4 py-3 text-xs"
+                className="flex items-center justify-between rounded-2xl bg-neutral-50/80 px-4 py-3 text-xs"
               >
                 <div>
-                  <div className="font-bold text-slate-900">{m.paymentMode}</div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="font-bold text-neutral-900">{m.paymentMode}</div>
+                  <div className="text-[11px] text-neutral-500">
                     {m.bookingCount} bookings · {m.totalPax} pax
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-bold text-slate-900">
+                  <div className="font-bold text-neutral-900">
                     ₹{m.totalAmount.toLocaleString('en-IN')}
                   </div>
                   <div className="text-[11px] text-emerald-700">
@@ -469,11 +469,11 @@ export function FinanceClient({
       <div className="ticket-perforation pt-6">
         <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
-              <ArrowRightLeft className="h-4 w-4 text-sky-600" />
+            <h2 className="flex items-center gap-1.5 text-sm font-bold text-neutral-900">
+              <ArrowRightLeft className="h-4 w-4 text-neutral-700" />
               Treasurer Transfer Queue
             </h2>
-            <div className="inline-flex flex-wrap gap-1 rounded-2xl bg-slate-100/90 p-1 text-xs">
+            <div className="inline-flex flex-wrap gap-1 rounded-2xl bg-neutral-100/90 p-1 text-xs">
               {(
                 [
                   { key: 'with_officer', label: `With Officer (${totals.withOfficerCount})` },
@@ -494,8 +494,8 @@ export function FinanceClient({
                   }}
                   className={`rounded-xl px-3 py-1.5 font-bold transition ${
                     filterStatus === tab.key
-                      ? 'bg-white text-slate-950 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-900'
+                      ? 'bg-white text-neutral-950 shadow-xs'
+                      : 'text-neutral-500 hover:text-neutral-900'
                   }`}
                 >
                   {tab.label}
@@ -511,7 +511,7 @@ export function FinanceClient({
                   type="button"
                   disabled={submitting}
                   onClick={() => runHandoverAction(selectedIds, 'mark_transferred', true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
                 >
                   <Send className="h-3.5 w-3.5" />
                   Mark Transferred ({selectedIds.length})
@@ -539,8 +539,8 @@ export function FinanceClient({
         )}
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-            <thead className="bg-slate-50 text-[11px] font-semibold uppercase text-slate-500">
+          <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
+            <thead className="bg-neutral-50 text-[11px] font-semibold uppercase text-neutral-500">
               <tr>
                 {canInteract && <th className="no-print w-8 px-3 py-2.5" />}
                 <th className="px-3 py-2.5">Code</th>
@@ -552,7 +552,7 @@ export function FinanceClient({
                 {canInteract && <th className="no-print px-3 py-2.5">Action</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-neutral-100">
               {filteredBookings.map((b) => (
                 <tr key={b.id}>
                   {canInteract && (
@@ -566,19 +566,19 @@ export function FinanceClient({
                       )}
                     </td>
                   )}
-                  <td className="px-3 py-2.5 font-bold text-slate-900">{b.bookingCode}</td>
+                  <td className="px-3 py-2.5 font-bold text-neutral-900">{b.bookingCode}</td>
                   <td className="px-3 py-2.5">
-                    <div className="font-medium text-slate-900">{b.holderName}</div>
-                    <div className="text-[11px] text-slate-500">{b.phone}</div>
+                    <div className="font-medium text-neutral-900">{b.holderName}</div>
+                    <div className="text-[11px] text-neutral-500">{b.phone}</div>
                   </td>
                   <td className="px-3 py-2.5">{b.totalPax}</td>
                   <td className="px-3 py-2.5">
-                    <div className="font-bold text-slate-900">
+                    <div className="font-bold text-neutral-900">
                       ₹{b.totalAmount.toLocaleString('en-IN')}
                     </div>
-                    <div className="text-[10px] text-slate-500">{b.paymentMode}</div>
+                    <div className="text-[10px] text-neutral-500">{b.paymentMode}</div>
                   </td>
-                  <td className="px-3 py-2.5 text-slate-700">{b.officerName}</td>
+                  <td className="px-3 py-2.5 text-neutral-700">{b.officerName}</td>
                   <td className="px-3 py-2.5">
                     {b.settlementStatus === 'received_by_treasurer' ? (
                       <div>
@@ -586,18 +586,18 @@ export function FinanceClient({
                           <CheckCircle2 className="h-3 w-3" /> Received by Treasurer
                         </span>
                         {b.transferReference && (
-                          <div className="mt-0.5 text-[10px] text-slate-500">
+                          <div className="mt-0.5 text-[10px] text-neutral-500">
                             Ref: {b.transferReference}
                           </div>
                         )}
                       </div>
                     ) : b.settlementStatus === 'transferred_to_treasurer' ? (
                       <div>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-800">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200/80 px-2 py-0.5 text-[10px] font-bold text-neutral-800">
                           <Send className="h-3 w-3" /> Sent to Treasurer
                         </span>
                         {b.transferReference && (
-                          <div className="mt-0.5 text-[10px] text-slate-500">
+                          <div className="mt-0.5 text-[10px] text-neutral-500">
                             Ref: {b.transferReference}
                           </div>
                         )}
@@ -616,7 +616,7 @@ export function FinanceClient({
                             type="button"
                             disabled={submitting}
                             onClick={() => runHandoverAction([b.id], 'mark_transferred', true)}
-                            className="inline-flex items-center gap-1 rounded bg-sky-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                            className="inline-flex items-center gap-1 rounded bg-neutral-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
                           >
                             <Send className="h-3 w-3" />
                             Mark Transferred
@@ -642,7 +642,7 @@ export function FinanceClient({
                               onClick={() =>
                                 runHandoverAction([b.id], 'reset_with_officer', false)
                               }
-                              className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                              className="inline-flex items-center gap-1 rounded border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-50"
                               title="Move back to With Officer"
                             >
                               <RotateCcw className="h-3 w-3" />
@@ -656,7 +656,7 @@ export function FinanceClient({
                               onClick={() =>
                                 runHandoverAction([b.id], 'reset_with_officer', false)
                               }
-                              className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                              className="rounded border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-50"
                             >
                               Revert
                             </button>
@@ -670,7 +670,7 @@ export function FinanceClient({
                 <tr>
                   <td
                     colSpan={canInteract ? 8 : 6}
-                    className="px-3 py-8 text-center text-slate-400"
+                    className="px-3 py-8 text-center text-neutral-400"
                   >
                     No bookings in this stage.
                   </td>

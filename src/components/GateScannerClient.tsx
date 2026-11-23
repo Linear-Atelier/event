@@ -597,7 +597,7 @@ export function GateScannerClient({
       {/* Top Frosted Glass Scanner Hero */}
       <div className="glass-surface shrink-0 px-4 py-3.5 text-white">
         <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300">
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
                 }`}
@@ -611,7 +611,7 @@ export function GateScannerClient({
           <select
             value={selectedEventId}
             onChange={(e) => setSelectedEventId(Number(e.target.value))}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white"
+            className="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-white"
           >
             {events.map((ev) => (
               <option key={ev.id} value={ev.id}>
@@ -623,12 +623,12 @@ export function GateScannerClient({
 
         {/* Unified Offline Sync Bar (Auto-syncs every 60s in Web Worker) */}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2.5">
-          <div className="text-xs text-slate-300">
+          <div className="text-xs text-neutral-300">
             {cachedEvent ? (
               <span>
                 Cached: <strong>{cachedBookingCount} bookings</strong>
                 {lastSyncedAt && (
-                  <span className="ml-2 text-[11px] text-slate-400">
+                  <span className="ml-2 text-[11px] text-neutral-400">
                     · Synced{' '}
                     {new Date(lastSyncedAt).toLocaleTimeString('en-IN', {
                       hour: '2-digit',
@@ -649,8 +649,8 @@ export function GateScannerClient({
             disabled={syncing || !isOnline}
             onClick={() => triggerUnifiedSync(true)}
             className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${pendingSyncCount > 0
-              ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
-              : 'bg-sky-500 text-slate-950 hover:bg-sky-400'
+              ? 'bg-amber-400 text-neutral-950 hover:bg-amber-300'
+              : 'bg-white text-neutral-950 hover:bg-neutral-200'
               } disabled:opacity-50`}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
@@ -664,7 +664,7 @@ export function GateScannerClient({
       </div>
 
       {statusBanner && (
-        <div className="flex shrink-0 items-center justify-between border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs font-medium text-sky-900">
+        <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 bg-neutral-100 px-4 py-2 text-xs font-medium text-neutral-900">
           <span>{statusBanner}</span>
           <button type="button" onClick={() => setStatusBanner(null)}>
             <X className="h-4 w-4" />
@@ -686,7 +686,7 @@ export function GateScannerClient({
                 />
                 <canvas ref={canvasRef} className="hidden" />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-52 w-52 rounded-3xl border-2 border-sky-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
+                  <div className="h-52 w-52 rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
                 </div>
                 <div className="absolute inset-x-0 bottom-4 flex justify-center">
                   <button
@@ -695,7 +695,7 @@ export function GateScannerClient({
                       userStoppedCameraRef.current = true
                       stopCamera()
                     }}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-950/80 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-rose-600"
+                    className="inline-flex items-center gap-2 rounded-full bg-neutral-950/80 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-rose-600"
                   >
                     <CameraOff className="h-4 w-4" />
                     Stop Camera
@@ -712,10 +712,10 @@ export function GateScannerClient({
                   }}
                   className="glass-surface inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-sm font-bold text-white shadow-xl transition hover:scale-[1.02] active:scale-[0.98]"
                 >
-                  <Camera className="h-5 w-5 text-sky-300" />
+                  <Camera className="h-5 w-5 text-white" />
                   Start Camera
                 </button>
-                <p className="mt-3 text-xs text-slate-400">
+                <p className="mt-3 text-xs text-neutral-400">
                   Tap to scan Master QR passes offline
                 </p>
                 {cameraError && (
@@ -733,7 +733,7 @@ export function GateScannerClient({
           onSubmit={handleDoorSaleSubmit}
           className="space-y-4 py-1"
         >
-          <h2 className="text-sm font-bold text-slate-900">
+          <h2 className="text-sm font-bold text-neutral-900">
             Fast Walk-In / Door Sales Entry (Auto Check-In)
           </h2>
 
@@ -751,7 +751,7 @@ export function GateScannerClient({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1 block text-xs font-medium text-neutral-700">
                 Guest Name *
               </label>
               <input
@@ -760,11 +760,11 @@ export function GateScannerClient({
                 value={doorName}
                 onChange={(e) => setDoorName(e.target.value)}
                 placeholder="Walk-in Guest Name"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1 block text-xs font-medium text-neutral-700">
                 Phone *
               </label>
               <input
@@ -773,23 +773,23 @@ export function GateScannerClient({
                 value={doorPhone}
                 onChange={(e) => setDoorPhone(e.target.value)}
                 placeholder="9847012345"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-medium text-slate-700">
+            <label className="block text-xs font-medium text-neutral-700">
               Select Walk-In Tickets
             </label>
             {doorPhases.map((p) => (
               <div
                 key={p.id}
-                className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-xs"
+                className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-xs"
               >
                 <div>
-                  <span className="font-bold text-slate-900">{p.ticketTypeName}</span>{' '}
-                  <span className="text-slate-500">
+                  <span className="font-bold text-neutral-900">{p.ticketTypeName}</span>{' '}
+                  <span className="text-neutral-500">
                     ({p.phaseName} · {p.paxMultiplier} pax · ₹{p.price})
                   </span>
                 </div>
@@ -802,7 +802,7 @@ export function GateScannerClient({
                         [p.id]: Math.max(0, (prev[p.id] || 0) - 1),
                       }))
                     }
-                    className="rounded border border-slate-300 px-2 py-0.5 font-bold"
+                    className="rounded border border-neutral-300 px-2 py-0.5 font-bold"
                   >
                     -
                   </button>
@@ -812,7 +812,7 @@ export function GateScannerClient({
                     onClick={() =>
                       setDoorQty((prev) => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))
                     }
-                    className="rounded bg-sky-600 px-2 py-0.5 font-bold text-white"
+                    className="rounded bg-neutral-900 px-2 py-0.5 font-bold text-white"
                   >
                     <Plus className="h-3 w-3" />
                   </button>
@@ -822,8 +822,8 @@ export function GateScannerClient({
           </div>
 
           {selectedDoorPhases.length > 0 && (
-            <div className="space-y-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="text-xs font-bold text-slate-800">
+            <div className="space-y-2.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+              <div className="text-xs font-bold text-neutral-800">
                 Attendee Names (Required for Every Pax)
               </div>
               {selectedDoorPhases.map((p) => {
@@ -831,9 +831,9 @@ export function GateScannerClient({
                 return Array.from({ length: qty }).map((_, tIdx) => (
                   <div
                     key={`${p.id}-${tIdx}`}
-                    className="space-y-1.5 rounded-md border border-slate-200 bg-white p-2.5"
+                    className="space-y-1.5 rounded-md border border-neutral-200 bg-white p-2.5"
                   >
-                    <div className="text-[11px] font-bold text-slate-700">
+                    <div className="text-[11px] font-bold text-neutral-700">
                       Ticket #{tIdx + 1} · {p.ticketTypeName} ({p.phaseName}) — {p.paxMultiplier}{' '}
                       Pax
                     </div>
@@ -853,7 +853,7 @@ export function GateScannerClient({
                               }))
                             }
                             placeholder={`Guest ${pIdx + 1} Full Name *`}
-                            className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs focus:border-sky-500 focus:outline-none"
+                            className="w-full rounded border border-neutral-300 px-2.5 py-1.5 text-xs focus:border-neutral-900 focus:outline-none"
                           />
                         )
                       })}
@@ -865,7 +865,7 @@ export function GateScannerClient({
           )}
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-700">
+            <label className="mb-1 block text-xs font-medium text-neutral-700">
               Payment Mode
             </label>
             <select
@@ -873,7 +873,7 @@ export function GateScannerClient({
               onChange={(e) =>
                 setDoorMode(e.target.value as 'CASH' | 'OFFICER_UPI' | 'PAY_AT_DOOR')
               }
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
             >
               <option value="CASH">Cash at Gate</option>
               <option value="OFFICER_UPI">Officer UPI</option>
@@ -898,13 +898,13 @@ export function GateScannerClient({
           Manual Lookup
         </h2>
         <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
           <input
             type="text"
             value={lookupQuery}
             onChange={(e) => setLookupQuery(e.target.value)}
             placeholder="Type XMAS26-B001, phone number, or guest name..."
-            className="w-full rounded-2xl border border-white/15 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white placeholder-slate-400 transition focus:border-sky-400 focus:bg-white/15 focus:outline-none"
+            className="w-full rounded-2xl border border-white/15 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white placeholder-neutral-400 transition focus:border-white/60 focus:bg-white/15 focus:outline-none"
           />
         </div>
 
@@ -920,15 +920,15 @@ export function GateScannerClient({
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-white">{b.bookingCode}</span>
-                    <span className="text-sm font-medium text-slate-200">
+                    <span className="text-sm font-medium text-neutral-200">
                       {b.holderName}
                     </span>
                   </div>
-                  <div className="text-xs text-slate-400">
+                  <div className="text-xs text-neutral-400">
                     {b.phone} · {b.totalPax} Pax · Tables: {b.tablesSummary}
                   </div>
                 </div>
-                <span className="rounded-xl bg-sky-500/20 px-3 py-1.5 text-xs font-bold text-sky-300">
+                <span className="rounded-xl bg-white/15 px-3 py-1.5 text-xs font-bold text-white">
                   Check In →
                 </span>
               </button>
@@ -939,12 +939,12 @@ export function GateScannerClient({
 
       {/* PRE-TICKED ATTENDEE CHECKLIST MODAL */}
       {activeBooking && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/70 p-4 sm:items-center">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-neutral-950/70 p-4 sm:items-center">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xl font-extrabold text-slate-900">
+                  <span className="text-xl font-extrabold text-neutral-900">
                     {activeBooking.bookingCode}
                   </span>
                   {activeBooking.status === 'cancelled' && (
@@ -953,16 +953,16 @@ export function GateScannerClient({
                     </span>
                   )}
                 </div>
-                <div className="text-sm font-semibold text-slate-800">
+                <div className="text-sm font-semibold text-neutral-800">
                   {activeBooking.holderName} · {activeBooking.totalPax} Pax
                 </div>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-neutral-500">
                   Tables: {activeBooking.tablesSummary} · {activeBooking.paymentMode} (
                   {activeBooking.paymentStatus})
                 </div>
               </div>
               <button type="button" onClick={() => setActiveBooking(null)}>
-                <X className="h-5 w-5 text-slate-400" />
+                <X className="h-5 w-5 text-neutral-400" />
               </button>
             </div>
 
@@ -984,19 +984,19 @@ export function GateScannerClient({
 
             {/* Attendee Slots Checklist (Grouped by Ticket; Pre-ticked by default; checked-in slots locked permanently) */}
             <div className="mt-4 h-[60vh] max-h-[90vh] space-y-3 overflow-y-auto pr-0.5">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
                 Uncheck absent guests, then confirm check-in:
               </div>
               {activeTicketGroups.map((grp) => (
                 <div
                   key={grp.ticketId}
-                  className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5"
+                  className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-2.5"
                 >
                   <div className="mb-1.5 flex items-center justify-between px-1">
-                    <span className="text-xs font-bold text-slate-800">
+                    <span className="text-xs font-bold text-neutral-800">
                       {grp.ticketCode} · {grp.typeName}
                     </span>
-                    <span className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 shadow-xs">
+                    <span className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-neutral-600 shadow-xs">
                       {grp.slots.length} {grp.slots.length === 1 ? 'Guest' : 'Guests'}
                     </span>
                   </div>
@@ -1014,10 +1014,10 @@ export function GateScannerClient({
                         <label
                           key={slot.id}
                           className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-xs transition ${alreadyLocked
-                            ? 'border-slate-200 bg-slate-100 text-slate-500'
+                            ? 'border-neutral-200 bg-neutral-100 text-neutral-500'
                             : checked
-                              ? 'border-emerald-400 bg-emerald-50/80 text-slate-900'
-                              : 'border-slate-200 bg-white text-slate-700'
+                              ? 'border-emerald-400 bg-emerald-50/80 text-neutral-900'
+                              : 'border-neutral-200 bg-white text-neutral-700'
                             }`}
                         >
                           <div className="flex items-center gap-2.5">
@@ -1036,12 +1036,12 @@ export function GateScannerClient({
                             <div>
                               <div className="font-semibold">{displayName}</div>
                               {grp.slots.length > 1 && !alreadyLocked && (
-                                <div className="text-[10px] text-slate-500">
+                                <div className="text-[10px] text-neutral-500">
                                   Guest {slot.slotIndex} of {grp.slots.length}
                                 </div>
                               )}
                               {alreadyLocked && (
-                                <div className="text-[10px] text-slate-500">
+                                <div className="text-[10px] text-neutral-500">
                                   Checked in at{' '}
                                   {new Date(slot.checkedInAt!).toLocaleTimeString('en-IN', {
                                     hour: '2-digit',
@@ -1053,12 +1053,12 @@ export function GateScannerClient({
                           </div>
 
                           {alreadyLocked ? (
-                            <span className="inline-flex items-center gap-1 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
+                            <span className="inline-flex items-center gap-1 rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-bold text-neutral-600">
                               <Lock className="h-3 w-3" /> LOCKED
                             </span>
                           ) : (
                             <CheckCircle2
-                              className={`h-4 w-4 ${checked ? 'text-emerald-600' : 'text-slate-300'}`}
+                              className={`h-4 w-4 ${checked ? 'text-emerald-600' : 'text-neutral-300'}`}
                             />
                           )}
                         </label>
@@ -1073,7 +1073,7 @@ export function GateScannerClient({
               <button
                 type="button"
                 onClick={() => setActiveBooking(null)}
-                className="flex-1 rounded-xl border border-slate-300 py-2.5 text-xs font-bold text-slate-700"
+                className="flex-1 rounded-xl border border-neutral-300 py-2.5 text-xs font-bold text-neutral-700"
               >
                 Cancel
               </button>

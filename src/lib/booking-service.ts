@@ -35,6 +35,10 @@ export interface CreateBookingInput {
   checkInMethod?: 'qr_scan' | 'manual_code' | 'door_sale'
 }
 
+function normalizeAttendeeName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
 export async function generateNextBookingCode(
   payload: Payload,
   eventId: number,
@@ -90,6 +94,7 @@ export async function createFullBooking(input: CreateBookingInput) {
       price: number
       ticketTypeName: string
       paxMultiplier: number
+      memberOnly: boolean
     }
   >()
 
@@ -106,6 +111,7 @@ export async function createFullBooking(input: CreateBookingInput) {
         price: Number(row.price) || 0,
         ticketTypeName: tt?.name || 'Ticket',
         paxMultiplier: Math.max(1, Number(tt?.paxMultiplier) || 1),
+        memberOnly: Boolean(tt?.memberOnly),
       })
     }
   }
@@ -117,12 +123,14 @@ export async function createFullBooking(input: CreateBookingInput) {
     price: number
     ticketTypeName: string
     paxMultiplier: number
+    memberOnly: boolean
     quantity: number
     paxList: TicketPaxInput[]
   }> = []
 
   let totalPax = 0
   let totalAmount = 0
+  const requiredMemberIds = new Set<number>()
 
   for (const item of input.tickets) {
     const qty = Math.max(0, Math.floor(Number(item.quantity) || 0))
@@ -137,9 +145,9 @@ export async function createFullBooking(input: CreateBookingInput) {
     const expectedPaxCount = paxPerTicket * qty
     const sanitizedPaxList: TicketPaxInput[] = Array.isArray(item.paxList)
       ? item.paxList.slice(0, expectedPaxCount).map((p) => ({
-          name: String(p?.name || '').trim(),
-          memberId: p?.memberId ? Number(p.memberId) : null,
-        }))
+        name: String(p?.name || '').trim(),
+        memberId: p?.memberId ? Number(p.memberId) : null,
+      }))
       : []
 
     if (
@@ -151,14 +159,144 @@ export async function createFullBooking(input: CreateBookingInput) {
       )
     }
 
+    if (resolved.memberOnly) {
+      for (let i = 0; i < sanitizedPaxList.length; i++) {
+        const attendee = sanitizedPaxList[i]
+        if (!attendee?.memberId) {
+          const ticketNo = Math.floor(i / paxPerTicket) + 1
+          const paxNo = (i % paxPerTicket) + 1
+          throw new Error(
+            `${resolved.ticketTypeName} is a Member-Only ticket — please select a registered member for Ticket #${ticketNo} (Pax ${paxNo}).`,
+          )
+        }
+        requiredMemberIds.add(attendee.memberId)
+      }
+    }
+
     totalPax += expectedPaxCount
     totalAmount += input.paymentMode === 'COMPLIMENTARY' ? 0 : resolved.price * qty
 
     resolvedLines.push({ ...resolved, quantity: qty, paxList: sanitizedPaxList })
   }
 
+  if (requiredMemberIds.size > 0) {
+    const ids = Array.from(requiredMemberIds)
+    const foundMembers = await payload.find({
+      collection: 'members',
+      overrideAccess: true,
+      where: { id: { in: ids } },
+      limit: ids.length,
+      depth: 0,
+    })
+    const membersById = new Map(foundMembers.docs.map((m) => [Number(m.id), m]))
+    for (const id of ids) {
+      const memberDoc = membersById.get(id)
+      if (!memberDoc) {
+        throw new Error('Selected member record for a Member-Only ticket was not found.')
+      }
+      if (memberDoc.subsStatus !== 'active') {
+        throw new Error(
+          `Member "${memberDoc.fullName}" (${memberDoc.memberCode}) cannot be added to a Member-Only ticket because their subscription status is "${memberDoc.subsStatus}".`,
+        )
+      }
+    }
+  }
+
   if (resolvedLines.length === 0 || totalPax <= 0) {
     throw new Error('Please select at least 1 valid ticket.')
+  }
+
+  // Enforce unique ticket attendees within this booking (intra-booking check)
+  const seenMemberIds = new Set<number>()
+  const seenNormalizedNames = new Set<string>()
+  for (const line of resolvedLines) {
+    for (const attendee of line.paxList) {
+      if (attendee.memberId) {
+        if (seenMemberIds.has(attendee.memberId)) {
+          throw new Error(
+            `${attendee.name} is added more than once in this booking. Each ticket attendee must be unique.`,
+          )
+        }
+        seenMemberIds.add(attendee.memberId)
+      }
+      const normName = normalizeAttendeeName(attendee.name)
+      if (normName) {
+        if (seenNormalizedNames.has(normName)) {
+          throw new Error(
+            `"${attendee.name}" is listed more than once in this booking. Each ticket attendee must be unique.`,
+          )
+        }
+        seenNormalizedNames.add(normName)
+      }
+    }
+  }
+
+  // Fetch active bookings for this event (used for both duplicate attendee check and table conflict check)
+  const activeBookingsRes = await payload.find({
+    collection: 'bookings',
+    overrideAccess: true,
+    where: {
+      and: [
+        { event: { equals: eventDoc.id } },
+        { status: { not_equals: 'cancelled' } },
+      ],
+    },
+    limit: 2000,
+    depth: 0,
+  })
+  const activeIds = activeBookingsRes.docs.map((b) => b.id)
+  const activeBookingCodeById = new Map(
+    activeBookingsRes.docs.map((b) => [b.id, b.bookingCode]),
+  )
+
+  // Enforce unique ticket attendees across all existing active bookings for this event
+  if (activeIds.length > 0) {
+    const existingSlotsRes = await payload.find({
+      collection: 'ticket-checkin-slots',
+      overrideAccess: true,
+      where: { booking: { in: activeIds } },
+      limit: 10000,
+      depth: 0,
+    })
+
+    const bookedMemberCode = new Map<number, string>()
+    const bookedNameCode = new Map<string, string>()
+
+    for (const slot of existingSlotsRes.docs) {
+      const bId = typeof slot.booking === 'object' ? slot.booking.id : slot.booking
+      const bCode = activeBookingCodeById.get(bId) || 'an existing booking'
+      const mId =
+        slot.member && typeof slot.member === 'object'
+          ? Number(slot.member.id)
+          : slot.member
+            ? Number(slot.member)
+            : null
+      if (mId) {
+        bookedMemberCode.set(mId, bCode)
+      }
+      const slotName = normalizeAttendeeName(
+        slot.attendeeName || slot.label.split(' — ')[0] || '',
+      )
+      if (slotName) {
+        bookedNameCode.set(slotName, bCode)
+      }
+    }
+
+    for (const line of resolvedLines) {
+      for (const attendee of line.paxList) {
+        if (attendee.memberId && bookedMemberCode.has(attendee.memberId)) {
+          throw new Error(
+            `${attendee.name} is already booked on ${bookedMemberCode.get(attendee.memberId)} for this event.`,
+          )
+        }
+        const normName = normalizeAttendeeName(attendee.name)
+        if (normName && bookedNameCode.has(normName)) {
+          throw new Error(
+            `"${attendee.name}" is already booked on ${bookedNameCode.get(normName)} for this event.`,
+          )
+        }
+      }
+    }
   }
 
   // Optional non-sharing table assignments (validated before creating booking)
@@ -181,20 +319,6 @@ export async function createFullBooking(input: CreateBookingInput) {
     }
 
     // Check non-sharing conflict against active bookings for this event
-    const activeBookingsRes = await payload.find({
-      collection: 'bookings',
-      user,
-      overrideAccess: false,
-      where: {
-        and: [
-          { event: { equals: eventDoc.id } },
-          { status: { not_equals: 'cancelled' } },
-        ],
-      },
-      limit: 2000,
-      depth: 0,
-    })
-    const activeIds = activeBookingsRes.docs.map((b) => b.id)
     if (activeIds.length > 0) {
       const existingAllocs = await payload.find({
         collection: 'booking-tables',

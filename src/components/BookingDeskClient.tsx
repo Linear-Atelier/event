@@ -4,9 +4,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  Loader2,
   Minus,
   Plus,
   Printer,
+  QrCode,
   Search,
   Send,
   Ticket,
@@ -62,6 +64,7 @@ interface TableOption {
 
 interface RecentBookingItem {
   id: number
+  eventId: number
   bookingCode: string
   holderName: string
   phone: string
@@ -90,6 +93,21 @@ interface PaxDetailEntry {
   touched?: boolean
 }
 
+interface BookedAttendee {
+  memberId: number | null
+  name: string
+  bookingCode: string
+}
+
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function formatTicketDisplayName(name: string): string {
+  const stripped = name.replace(/^(?:non[-\s]?member|member)\s+/i, '').trim()
+  return stripped || name
+}
+
 interface BookingDeskClientProps {
   events: EventOption[]
   initialEventId: number | null
@@ -109,6 +127,7 @@ export function BookingDeskClient({
   )
   const [phases, setPhases] = useState<PhaseOption[]>([])
   const [tables, setTables] = useState<TableOption[]>([])
+  const [bookedAttendees, setBookedAttendees] = useState<BookedAttendee[]>([])
   const [loadingMeta, setLoadingMeta] = useState(false)
 
   // Primary Holder member lookup (combined with Holder Full Name field)
@@ -117,10 +136,13 @@ export function BookingDeskClient({
   const [selectedMember, setSelectedMember] = useState<MemberResult | null>(null)
   const [searchingMembers, setSearchingMembers] = useState(false)
 
-  // Holder info
+  // Holder info (auto-prefilled from the first attendee unless manually edited)
   const [holderName, setHolderName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
+  const [holderTouched, setHolderTouched] = useState(false)
+  const [phoneTouched, setPhoneTouched] = useState(false)
+  const [emailTouched, setEmailTouched] = useState(false)
   const [paymentMode, setPaymentMode] = useState<
     'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR'
   >('CASH')
@@ -158,6 +180,7 @@ export function BookingDeskClient({
   // Manage bookings state
   const [recentBookings, setRecentBookings] = useState<RecentBookingItem[]>(initialRecent)
   const [manageSearch, setManageSearch] = useState('')
+  const [manageFilter, setManageFilter] = useState<'all' | 'unissued' | 'no_table'>('all')
   const [editingTablesFor, setEditingTablesFor] = useState<RecentBookingItem | null>(null)
   const [editSelectedTables, setEditSelectedTables] = useState<string[]>([])
   const [editResend, setEditResend] = useState(true)
@@ -198,6 +221,7 @@ export function BookingDeskClient({
         const data = await res.json()
         setPhases((data.ticketPhases || []).filter((p: PhaseOption) => p.isActive))
         setTables(data.tables || [])
+        setBookedAttendees(Array.isArray(data.bookedAttendees) ? data.bookedAttendees : [])
       }
     } finally {
       setLoadingMeta(false)
@@ -248,6 +272,9 @@ export function BookingDeskClient({
     setHolderName(m.fullName)
     setPhone(m.phone)
     setEmail(m.email || '')
+    setHolderTouched(true)
+    setPhoneTouched(true)
+    setEmailTouched(true)
     setMemberResults([])
     setHolderFocused(false)
   }
@@ -282,6 +309,36 @@ export function BookingDeskClient({
     [phases, quantities],
   )
 
+  const defaultPhaseName = useMemo(() => {
+    if (phases.length === 0) return null
+    const counts = new Map<string, number>()
+    for (const p of phases) {
+      counts.set(p.phaseName, (counts.get(p.phaseName) || 0) + 1)
+    }
+    let best = phases[0].phaseName
+    let bestCount = 0
+    for (const [name, count] of counts.entries()) {
+      if (count > bestCount) {
+        best = name
+        bestCount = count
+      }
+    }
+    return best
+  }, [phases])
+
+  const groupedTicketPhases = useMemo(() => {
+    const memberItems = phases.filter((p) => p.memberOnly)
+    const nonMemberItems = phases.filter((p) => !p.memberOnly)
+    const groups: Array<{ key: 'member' | 'non_member'; title: string; items: PhaseOption[] }> = []
+    if (memberItems.length > 0) {
+      groups.push({ key: 'member', title: 'Member', items: memberItems })
+    }
+    if (nonMemberItems.length > 0) {
+      groups.push({ key: 'non_member', title: 'Non-Member', items: nonMemberItems })
+    }
+    return groups
+  }, [phases])
+
   const expandedTicketGroups = useMemo(() => {
     const groups: Array<{
       phase: PhaseOption
@@ -313,33 +370,72 @@ export function BookingDeskClient({
 
   const getPaxEntry = useCallback(
     (key: string): PaxDetailEntry => {
-      const existing = paxDetails[key]
-      if (existing?.touched) return existing
-      if (key === firstPaxKey) {
-        return {
-          name: holderName,
-          memberId: selectedMember?.id || null,
-          memberCode: selectedMember?.memberCode || null,
-          subsStatus: selectedMember?.subsStatus || null,
-          touched: false,
-        }
-      }
-      return existing || { name: '', memberId: null }
+      return paxDetails[key] || { name: '', memberId: null }
     },
-    [paxDetails, firstPaxKey, holderName, selectedMember],
+    [paxDetails],
   )
 
-  const missingPaxCount = useMemo(() => {
-    let missing = 0
-    for (const grp of expandedTicketGroups) {
-      for (const k of grp.paxKeys) {
-        if (!getPaxEntry(k).name.trim()) {
-          missing += 1
-        }
-      }
+  const { bookedByMemberId, bookedByNormalizedName } = useMemo(() => {
+    const byId = new Map<number, string>()
+    const byName = new Map<string, string>()
+    for (const a of bookedAttendees) {
+      if (a.memberId) byId.set(a.memberId, a.bookingCode)
+      const norm = normalizeName(a.name)
+      if (norm) byName.set(norm, a.bookingCode)
     }
-    return missing
-  }, [expandedTicketGroups, getPaxEntry])
+    return { bookedByMemberId: byId, bookedByNormalizedName: byName }
+  }, [bookedAttendees])
+
+  const { missingPaxCount, missingMemberCount, slotDuplicateErrors, duplicatePaxCount } =
+    useMemo(() => {
+      let missingNames = 0
+      let missingMembers = 0
+      const dupErrors = new Map<string, string>()
+      const seenMemberKey = new Map<number, string>()
+      const seenNameKey = new Map<string, string>()
+
+      for (const grp of expandedTicketGroups) {
+        grp.paxKeys.forEach((k) => {
+          const entry = getPaxEntry(k)
+          const requiresMember = Boolean(grp.phase.memberOnly)
+          if (requiresMember && !entry.memberId) {
+            missingMembers += 1
+          } else if (!entry.name.trim()) {
+            missingNames += 1
+          }
+
+          if (entry.memberId) {
+            const existingCode = bookedByMemberId.get(entry.memberId)
+            if (existingCode) {
+              dupErrors.set(k, `Already booked on ${existingCode}`)
+            } else if (seenMemberKey.has(entry.memberId)) {
+              dupErrors.set(k, 'Already added in another ticket slot')
+            } else {
+              seenMemberKey.set(entry.memberId, k)
+            }
+          }
+
+          const norm = normalizeName(entry.name)
+          if (norm && !dupErrors.has(k)) {
+            const existingCode = bookedByNormalizedName.get(norm)
+            if (existingCode) {
+              dupErrors.set(k, `Already booked on ${existingCode}`)
+            } else if (seenNameKey.has(norm)) {
+              dupErrors.set(k, 'Duplicate name in this booking')
+            } else {
+              seenNameKey.set(norm, k)
+            }
+          }
+        })
+      }
+
+      return {
+        missingPaxCount: missingNames + missingMembers,
+        missingMemberCount: missingMembers,
+        slotDuplicateErrors: dupErrors,
+        duplicatePaxCount: dupErrors.size,
+      }
+    }, [expandedTicketGroups, getPaxEntry, bookedByMemberId, bookedByNormalizedName])
 
   // Debounced inline member lookup for the active pax input
   const activePaxQuery = activePaxKey ? getPaxEntry(activePaxKey).name.trim() : ''
@@ -376,7 +472,8 @@ export function BookingDeskClient({
       ? paxMemberResults
       : []
 
-  function selectPaxMember(key: string, m: MemberResult) {
+  function selectPaxMember(key: string, m: MemberResult, requiresMember: boolean) {
+    if (requiresMember && m.subsStatus !== 'active') return
     setPaxDetails((prev) => ({
       ...prev,
       [key]: {
@@ -387,6 +484,28 @@ export function BookingDeskClient({
         touched: true,
       },
     }))
+
+    // Auto-prefill Booking Contact from first attendee (or if contact fields are still untouched/empty)
+    if (key === firstPaxKey || (!holderTouched && !holderName.trim())) {
+      if (!holderTouched) {
+        setHolderName(m.fullName)
+        setSelectedMember(m)
+      }
+      if (!phoneTouched && m.phone) {
+        setPhone(m.phone)
+      }
+      if (!emailTouched && m.email) {
+        setEmail(m.email)
+      }
+    } else {
+      if (!phoneTouched && !phone.trim() && m.phone) {
+        setPhone(m.phone)
+      }
+      if (!emailTouched && !email.trim() && m.email) {
+        setEmail(m.email)
+      }
+    }
+
     setPaxMemberResults([])
     setActivePaxKey(null)
   }
@@ -402,21 +521,31 @@ export function BookingDeskClient({
         touched: true,
       },
     }))
+
+    if (key === firstPaxKey && !holderTouched) {
+      setHolderName(value)
+      setSelectedMember(null)
+    }
+
     setActivePaxKey(key)
   }
 
-  function clearPaxMemberLink(key: string) {
+  function clearPaxMemberLink(key: string, clearText = false) {
     const curr = getPaxEntry(key)
     setPaxDetails((prev) => ({
       ...prev,
       [key]: {
-        name: curr.name,
+        name: clearText ? '' : curr.name,
         memberId: null,
         memberCode: null,
         subsStatus: null,
         touched: true,
       },
     }))
+    if (key === firstPaxKey && !holderTouched) {
+      setSelectedMember(null)
+      if (clearText) setHolderName('')
+    }
   }
 
   const { totalPax, totalAmount } = useMemo(() => {
@@ -486,6 +615,13 @@ export function BookingDeskClient({
           const key = `${p.id}-${tIdx}-${pIdx}`
           const entry = getPaxEntry(key)
           const trimmedName = entry.name.trim()
+          const requiresMember = Boolean(p.memberOnly)
+          if (requiresMember && !entry.memberId) {
+            setError(
+              `${p.ticketTypeName} is Member-Only — please select a registered member for every attendee on Ticket #${tIdx + 1}.`,
+            )
+            return
+          }
           if (!trimmedName) {
             setError(
               `Please enter a name for every guest on ${p.ticketTypeName} (${p.phaseName}).`,
@@ -563,6 +699,7 @@ export function BookingDeskClient({
       setRecentBookings((prev) => [
         {
           id: data.booking.id,
+          eventId: selectedEventId,
           bookingCode: data.booking.bookingCode,
           holderName: data.booking.holderName,
           phone: data.booking.phone,
@@ -605,6 +742,9 @@ export function BookingDeskClient({
       setHolderName('')
       setPhone('')
       setEmail('')
+      setHolderTouched(false)
+      setPhoneTouched(false)
+      setEmailTouched(false)
       setNotes('')
       setQuantities({})
       setPaxDetails({})
@@ -731,24 +871,43 @@ export function BookingDeskClient({
     }
   }
 
+  const eventRecentBookings = useMemo(
+    () => recentBookings.filter((b) => b.eventId === selectedEventId),
+    [recentBookings, selectedEventId],
+  )
+
   const filteredRecent = useMemo(() => {
     const q = manageSearch.trim().toLowerCase()
-    if (!q) return recentBookings
-    return recentBookings.filter(
-      (b) =>
+    return eventRecentBookings.filter((b) => {
+      if (manageFilter === 'unissued') {
+        if (b.status === 'cancelled' || !b.tickets.some((t) => !t.physicalIssued)) {
+          return false
+        }
+      } else if (manageFilter === 'no_table') {
+        if (b.status === 'cancelled' || (b.assignedTableLabels && b.assignedTableLabels.length > 0)) {
+          return false
+        }
+      }
+      if (!q) return true
+      return (
         b.bookingCode.toLowerCase().includes(q) ||
         b.holderName.toLowerCase().includes(q) ||
         b.phone.toLowerCase().includes(q) ||
-        b.tickets.some((t) => t.ticketCode.toLowerCase().includes(q)),
-    )
-  }, [recentBookings, manageSearch])
+        b.tickets.some(
+          (t) =>
+            t.ticketCode.toLowerCase().includes(q) ||
+            (t.paxNames || []).some((n) => n.toLowerCase().includes(q)),
+        )
+      )
+    })
+  }, [eventRecentBookings, manageSearch, manageFilter])
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         {/* <div>
-          <h1 className="text-2xl font-bold text-slate-900">Booking Officer POS Desk</h1>
-          <p className="text-sm text-slate-600">
+          <h1 className="text-2xl font-bold text-neutral-900">Booking Officer POS Desk</h1>
+          <p className="text-sm text-neutral-600">
             Fast officer-only ticket entry, member subs lookup, smart seating &amp; physical stub tracking.
           </p>
         </div> */}
@@ -757,7 +916,7 @@ export function BookingDeskClient({
           <select
             value={selectedEventId}
             onChange={(e) => setSelectedEventId(Number(e.target.value))}
-            className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold text-slate-800"
+            className="flex-1 rounded-full border border-neutral-300 bg-white px-3 py-2 text-lg font-semibold text-neutral-800"
           >
             {events.map((ev) => (
               <option key={ev.id} value={ev.id}>
@@ -766,13 +925,13 @@ export function BookingDeskClient({
             ))}
           </select>
 
-          <div className="flex flex-1 rounded-2xl bg-slate-100/90 p-1">
+          <div className="flex flex-1 rounded-2xl bg-neutral-100/90 p-1">
             <button
               type="button"
               onClick={() => setMode('new')}
               className={`flex-1 rounded-xl px-3 py-2 text-xs font-bold transition ${mode === 'new'
-                ? 'bg-white text-slate-950 shadow-xs'
-                : 'text-slate-500 hover:text-slate-800'
+                ? 'bg-white text-neutral-950 shadow-xs'
+                : 'text-neutral-500 hover:text-neutral-800'
                 }`}
             >
               New Booking
@@ -781,11 +940,11 @@ export function BookingDeskClient({
               type="button"
               onClick={() => setMode('manage')}
               className={`flex-1 rounded-xl px-3 py-2 text-xs font-bold transition ${mode === 'manage'
-                ? 'bg-white text-slate-950 shadow-xs'
-                : 'text-slate-500 hover:text-slate-800'
+                ? 'bg-white text-neutral-950 shadow-xs'
+                : 'text-neutral-500 hover:text-neutral-800'
                 }`}
             >
-              Manage / Stubs ({recentBookings.length})
+              Manage / Stubs ({eventRecentBookings.length})
             </button>
           </div>
         </div>
@@ -799,52 +958,471 @@ export function BookingDeskClient({
       )}
 
       {mode === 'new' ? (
-        <form onSubmit={handleCreateBooking} className="grid gap-6 lg:grid-cols-3">
-          {/* Left 2 columns: Member Lookup, Guest Info, Tickets, Tables */}
-          <div className="space-y-6 lg:col-span-2">
+        <form onSubmit={handleCreateBooking} className="grid gap-6 pb-40 lg:grid-cols-5 lg:pb-0">
+          {/* Left columns: Tickets & Tables */}
+          <div className="space-y-6 lg:col-span-3">
             {error && (
               <div className="rounded-lg border border-rose-300 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-800">
                 {error}
               </div>
             )}
 
-            {/* 1. Unified Holder Lookup, Ticket Selection & Required Attendee Names */}
-            <div className="bg-white py-2">
-              <div className="flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                  <UserCheck className="h-4 w-4 text-sky-600" />
-                  1. Booking Name
+            {/* 1. Select Tickets + Inline Member/Guest Entry */}
+            <div className="bg-white py-1">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900">
+                  <Ticket className="h-4 w-4 text-zinc-700" />
+                  1. Select Tickets
                 </h2>
-                {selectedMember && (
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase ${selectedMember.subsStatus === 'active'
-                        ? 'bg-emerald-600 text-white'
-                        : selectedMember.subsStatus === 'arrears'
-                          ? 'bg-amber-500 text-white'
-                          : 'bg-rose-600 text-white'
-                        }`}
-                    >
-                      {selectedMember.memberCode} · Subs: {selectedMember.subsStatus}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={clearMember}
-                      className="text-xs font-medium text-slate-500 hover:text-rose-600"
-                    >
-                      Unlink
-                    </button>
-                  </div>
+                {defaultPhaseName && (
+                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
+                    {defaultPhaseName}
+                  </span>
                 )}
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {loadingMeta ? (
+                <p className="mt-3 text-xs text-zinc-500">Loading tickets…</p>
+              ) : groupedTicketPhases.length === 0 ? (
+                <p className="mt-3 text-xs text-amber-700">
+                  No active ticket phases configured for this event.
+                </p>
+              ) : (
+                <div className="mt-4 space-y-5">
+                  {groupedTicketPhases.map((group) => (
+                    <div key={group.key}>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                        {group.title}
+                      </h3>
+
+                      <div className="divide-y divide-zinc-100 rounded-2xl border border-zinc-200 bg-white">
+                        {group.items.map((p) => {
+                          const qty = quantities[p.id] || 0
+                          const displayName = formatTicketDisplayName(p.ticketTypeName)
+                          const showRowPhase =
+                            Boolean(defaultPhaseName) && p.phaseName !== defaultPhaseName
+                          const lineSubtotal = qty * p.price
+
+                          return (
+                            <div
+                              key={p.id}
+                              className={`px-4 py-3.5 transition first:rounded-t-2xl last:rounded-b-2xl ${qty > 0
+                                ? 'bg-zinc-50/80 shadow-[inset_3px_0_0_0_#18181b]'
+                                : 'bg-white'
+                                }`}
+                            >
+                              {/* Compact 2-Column Row: Left Info / Right Unified Stepper */}
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="text-[15px] font-semibold leading-snug text-zinc-900">
+                                      {displayName}
+                                    </span>
+                                    <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500">
+                                      {p.paxMultiplier} pax
+                                    </span>
+                                    {showRowPhase && (
+                                      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                                        {p.phaseName}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="mt-0.5 flex items-baseline gap-1.5 tabular-nums">
+                                    <span className="text-sm font-semibold text-zinc-900">
+                                      ₹{p.price.toLocaleString('en-IN')}
+                                    </span>
+                                    {qty > 1 && (
+                                      <span className="text-xs font-medium text-zinc-500">
+                                        · ₹{lineSubtotal.toLocaleString('en-IN')}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Unified h-9 Stepper (Right-Anchored) */}
+                                <div className="shrink-0">
+                                  {qty === 0 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => adjustQty(p.id, 1)}
+                                      aria-label={`Add ${p.ticketTypeName} ticket`}
+                                      className="inline-flex h-9 items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100 active:scale-[0.98]"
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                      <span>Add</span>
+                                    </button>
+                                  ) : (
+                                    <div className="inline-flex h-9 items-center rounded-xl bg-zinc-900 text-white shadow-xs">
+                                      <button
+                                        type="button"
+                                        onClick={() => adjustQty(p.id, -1)}
+                                        aria-label={`Decrease ${p.ticketTypeName} tickets`}
+                                        className="flex h-9 w-9 items-center justify-center rounded-l-xl transition hover:bg-zinc-800 active:bg-zinc-700"
+                                      >
+                                        <Minus className="h-3.5 w-3.5" />
+                                      </button>
+                                      <span className="min-w-[2ch] px-1 text-center text-sm font-bold tabular-nums">
+                                        {qty}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => adjustQty(p.id, 1)}
+                                        aria-label={`Increase ${p.ticketTypeName} tickets`}
+                                        className="flex h-9 w-9 items-center justify-center rounded-r-xl transition hover:bg-zinc-800 active:bg-zinc-700"
+                                      >
+                                        <Plus className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                        {/* Inline Member / Guest Inputs inside this selected Ticket */}
+                        {qty > 0 && (
+                          <div className="mt-3.5 space-y-3 border-t border-dashed border-neutral-200 pt-3">
+                            {Array.from({ length: qty }).map((_, tIdx) => (
+                              <div
+                                key={`${p.id}-inst-${tIdx}`}
+                                className="border-b border-neutral-200 pb-4 last:border-b-0 last:pb-0"
+                              >
+                                {qty > 1 && (
+                                  <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                                    {p.ticketTypeName} #{tIdx + 1}
+                                  </div>
+                                )}
+
+                                <div className="grid gap-2.5 sm:grid-cols-2">
+                                  {Array.from({ length: p.paxMultiplier }).map((__, pIdx) => {
+                                    const paxKey = `${p.id}-${tIdx}-${pIdx}`
+                                    const entry = getPaxEntry(paxKey)
+                                    const isFocused = activePaxKey === paxKey
+                                    const dupError = slotDuplicateErrors.get(paxKey)
+                                    const requiresMember = Boolean(p.memberOnly)
+                                    const label = requiresMember
+                                      ? p.paxMultiplier > 1
+                                        ? pIdx === 0
+                                          ? 'Member (Pax 1) *'
+                                          : `Member Spouse / Partner (Pax ${pIdx + 1}) *`
+                                        : 'Member *'
+                                      : p.paxMultiplier > 1
+                                        ? `Guest ${pIdx + 1} Name *`
+                                        : 'Guest Name *'
+
+                                    return (
+                                      <div key={paxKey} className="relative">
+                                        <div className="mb-1 flex items-center justify-between gap-2">
+                                          <label className="text-[11px] font-semibold text-neutral-700">
+                                            {label}
+                                          </label>
+                                          {!requiresMember && entry.memberId && (
+                                            <span
+                                              className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${entry.subsStatus === 'active'
+                                                ? 'bg-emerald-100 text-emerald-800'
+                                                : entry.subsStatus === 'arrears'
+                                                  ? 'bg-amber-100 text-amber-800'
+                                                  : 'bg-rose-100 text-rose-800'
+                                                }`}
+                                            >
+                                              {entry.memberCode} · {entry.subsStatus}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Locked Member Chip when a Member is selected on a Member-Only slot */}
+                                        {requiresMember && entry.memberId ? (
+                                          <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2">
+                                            <div className="min-w-0">
+                                              <div className="truncate text-xs font-bold text-neutral-900">
+                                                {entry.name}
+                                              </div>
+                                              <div className="flex items-center gap-1.5 text-[10px] font-semibold">
+                                                <span className="text-neutral-500">
+                                                  {entry.memberCode}
+                                                </span>
+                                                <span
+                                                  className={`rounded-full px-1.5 py-0.2 uppercase ${entry.subsStatus === 'active'
+                                                    ? 'bg-emerald-100 text-emerald-800'
+                                                    : entry.subsStatus === 'arrears'
+                                                      ? 'bg-amber-100 text-amber-800'
+                                                      : 'bg-rose-100 text-rose-800'
+                                                    }`}
+                                                >
+                                                  {entry.subsStatus}
+                                                </span>
+                                              </div>
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={() => clearPaxMemberLink(paxKey, true)}
+                                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-neutral-500 shadow-xs hover:text-rose-600"
+                                              title="Change member"
+                                            >
+                                              <X className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <>
+                                            <div className="relative">
+                                              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
+                                              <input
+                                                type="text"
+                                                required
+                                                value={entry.name}
+                                                onFocus={() => setActivePaxKey(paxKey)}
+                                                onBlur={() =>
+                                                  setTimeout(
+                                                    () =>
+                                                      setActivePaxKey((curr) =>
+                                                        curr === paxKey ? null : curr,
+                                                      ),
+                                                    180,
+                                                  )
+                                                }
+                                                onChange={(e) =>
+                                                  updatePaxName(paxKey, e.target.value)
+                                                }
+                                                placeholder={
+                                                  requiresMember
+                                                    ? 'Search & pick member (name, phone, ID)…'
+                                                    : 'Type guest name or search member…'
+                                                }
+                                                className={`w-full rounded-xl border bg-white py-2 pl-8 pr-8 text-xs focus:border-neutral-900 focus:outline-none ${dupError
+                                                  ? 'border-rose-400 bg-rose-50/40'
+                                                  : requiresMember && !entry.memberId
+                                                    ? 'border-amber-300 bg-amber-50/30'
+                                                    : !entry.name.trim()
+                                                      ? 'border-amber-300'
+                                                      : 'border-neutral-300'
+                                                  }`}
+                                              />
+                                              {entry.memberId && !requiresMember && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => clearPaxMemberLink(paxKey, false)}
+                                                  className="absolute right-2 top-2 text-neutral-400 hover:text-rose-600"
+                                                  title="Unlink member"
+                                                >
+                                                  <X className="h-3.5 w-3.5" />
+                                                </button>
+                                              )}
+                                              {isFocused && searchingPax && (
+                                                <span className="absolute right-2.5 top-2 text-[10px] text-neutral-400">
+                                                  …
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            {dupError && (
+                                              <p className="mt-1 text-[10px] font-semibold text-rose-600">
+                                                {dupError}
+                                              </p>
+                                            )}
+
+                                            {!dupError &&
+                                              requiresMember &&
+                                              entry.name.trim().length > 0 &&
+                                              !entry.memberId && (
+                                                <p className="mt-1 text-[10px] font-semibold text-amber-700">
+                                                  Tap a member from the list below to select
+                                                </p>
+                                              )}
+
+                                            {isFocused &&
+                                              !entry.memberId &&
+                                              visiblePaxMemberResults.length > 0 && (
+                                                <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
+                                                  {visiblePaxMemberResults.map((m) => {
+                                                    const bookedCode = bookedByMemberId.get(m.id)
+                                                    const usedElsewhereInForm = expandedTicketGroups.some((g) =>
+                                                      g.paxKeys.some(
+                                                        (k) => k !== paxKey && getPaxEntry(k).memberId === m.id,
+                                                      ),
+                                                    )
+                                                    const subsBlocked = requiresMember && m.subsStatus !== 'active'
+                                                    const canSelect =
+                                                      !subsBlocked && !bookedCode && !usedElsewhereInForm
+                                                    const blockedReason = bookedCode
+                                                      ? `Booked on ${bookedCode}`
+                                                      : usedElsewhereInForm
+                                                        ? 'Already selected'
+                                                        : subsBlocked
+                                                          ? 'Active subs required'
+                                                          : null
+
+                                                    return (
+                                                      <button
+                                                        key={m.id}
+                                                        type="button"
+                                                        disabled={!canSelect}
+                                                        onMouseDown={(e) => {
+                                                          e.preventDefault()
+                                                          if (canSelect) selectPaxMember(paxKey, m, requiresMember)
+                                                        }}
+                                                        className={`flex w-full items-center justify-between border-b border-neutral-100 px-3 py-2 text-left text-xs ${canSelect
+                                                          ? 'hover:bg-neutral-100'
+                                                          : 'cursor-not-allowed bg-neutral-50/70 opacity-60'
+                                                          }`}
+                                                      >
+                                                        <div>
+                                                          <div className="font-semibold text-neutral-900">
+                                                            {m.fullName} ({m.memberCode})
+                                                          </div>
+                                                          <div className="text-[10px] text-neutral-500">
+                                                            {m.phone}
+                                                            {blockedReason && (
+                                                              <span className="ml-1.5 font-semibold text-rose-600">
+                                                                · {blockedReason}
+                                                              </span>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                        <span
+                                                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
+                                                            ? 'bg-emerald-100 text-emerald-800'
+                                                            : m.subsStatus === 'arrears'
+                                                              ? 'bg-amber-100 text-amber-800'
+                                                              : 'bg-rose-100 text-rose-800'
+                                                            }`}
+                                                        >
+                                                          {m.subsStatus}
+                                                        </span>
+                                                      </button>
+                                                    )
+                                                  })}
+                                                </div>
+                                              )}
+                                          </>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                              </div>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 2. Smart Table Allocation (Optional at booking time) */}
+            <div className="ticket-perforation pt-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-bold text-neutral-900">
+                  <Users className="h-4 w-4 text-neutral-700" />
+                  2. Smart Table Allocation
+                </h2>
+                {totalPax > 0 && tables.length > 0 && (
+                  <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-800">
+                    {tableEval.recommendationText}
+                  </span>
+                )}
+              </div>
+
+              {tableEval.warningText && tables.length > 0 && (
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                  {tableEval.warningText}
+                </div>
+              )}
+
+              {loadingMeta ? (
+                <div className="mt-3 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-8 text-center text-xs font-medium text-neutral-400">
+                  Loading tables…
+                </div>
+              ) : tables.length === 0 ? (
+                <div className="mt-3 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-8 text-center">
+                  {/* <Users className="mx-auto h-7 w-7 text-neutral-300" /> */}
+                  <p className="mt-2 text-xs font-bold text-neutral-700">
+                    No tables configured for this event
+                  </p>
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    You can still confirm this booking now and assign tables later.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
+                  {tables.map((t) => {
+                    const isSelected = selectedTables.includes(t.tableLabel)
+                    return (
+                      <button
+                        key={t.tableLabel}
+                        type="button"
+                        disabled={t.isReserved}
+                        onClick={() => toggleTableSelection(t.tableLabel)}
+                        className={`flex flex-col items-start justify-between rounded-lg border p-3 text-left text-xs transition ${t.isReserved
+                          ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400'
+                          : isSelected
+                            ? 'border-neutral-900 bg-neutral-100 text-neutral-900 ring-1 ring-neutral-900'
+                            : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-500'
+                          }`}
+                      >
+                        <div className="flex w-full items-center justify-between">
+                          <span className="text-sm font-bold">{t.tableLabel}</span>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${t.isReserved
+                              ? 'bg-neutral-200 text-neutral-500'
+                              : isSelected
+                                ? 'bg-neutral-900 text-white'
+                                : 'bg-neutral-100 text-neutral-700'
+                              }`}
+                          >
+                            {t.maxCapacity} seats
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-neutral-500">{t.tableTypeName}</div>
+                        <div className="mt-1.5 text-[10px] font-semibold">
+                          {t.isReserved ? (
+                            <span className="text-rose-600">
+                              Reserved · {t.reservedByBookingCode}
+                            </span>
+                          ) : isSelected ? (
+                            <span className="text-neutral-900">✓ Selected (Full Table)</span>
+                          ) : (
+                            <span className="text-emerald-700">Available — Click to reserve</span>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: 3. Booking Contact, Summary & Payment */}
+          <div className="space-y-4 pb-20 lg:col-span-2 lg:pb-0">
+            <div ref={summaryCardRef} className="sticky top-20 rounded-3xl bg-neutral-50/90 p-5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-bold text-neutral-900">
+                  <UserCheck className="h-4 w-4 text-neutral-700" />
+                  3. Booking Contact &amp; Payment
+                </h2>
+                {selectedMember && (
+                  <button
+                    type="button"
+                    onClick={clearMember}
+                    className="text-[11px] font-semibold text-neutral-500 hover:text-rose-600"
+                  >
+                    Unlink {selectedMember.memberCode}
+                  </button>
+                )}
+              </div>
+
+              {/* Prefilled Booking Holder Contact */}
+              <div className="mt-4 space-y-3 border-b border-dashed border-neutral-200 pb-4">
                 <div className="relative">
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
+                  <label className="mb-1 block text-xs font-semibold text-neutral-700">
                     Booking Name *
                   </label>
                   <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-neutral-400" />
                     <input
                       type="text"
                       required
@@ -853,21 +1431,22 @@ export function BookingDeskClient({
                       onBlur={() => setTimeout(() => setHolderFocused(false), 180)}
                       onChange={(e) => {
                         setHolderName(e.target.value)
+                        setHolderTouched(true)
                         if (selectedMember) setSelectedMember(null)
                         setHolderFocused(true)
                       }}
-                      placeholder="Search member or type guest name..."
-                      className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-sky-500 focus:outline-none"
+                      placeholder="Auto-fills from first ticket..."
+                      className="w-full rounded-xl border border-neutral-300 bg-white py-2 pl-8 pr-3 text-sm focus:border-neutral-900 focus:outline-none"
                     />
                     {holderFocused && searchingMembers && (
-                      <span className="absolute right-2.5 top-2.5 text-xs text-slate-400">
+                      <span className="absolute right-2.5 top-2.5 text-xs text-neutral-400">
                         …
                       </span>
                     )}
                   </div>
 
                   {visibleMemberResults.length > 0 && (
-                    <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                    <div className="absolute z-30 mt-1 max-h-52 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
                       {visibleMemberResults.map((m) => (
                         <button
                           key={m.id}
@@ -876,18 +1455,18 @@ export function BookingDeskClient({
                             e.preventDefault()
                             selectMember(m)
                           }}
-                          className="flex w-full items-center justify-between border-b border-slate-100 px-3 py-2 text-left text-xs hover:bg-sky-50"
+                          className="flex w-full items-center justify-between border-b border-neutral-100 px-3 py-2 text-left text-xs hover:bg-neutral-100"
                         >
                           <div>
-                            <div className="font-semibold text-slate-900">
+                            <div className="font-semibold text-neutral-900">
                               {m.fullName} ({m.memberCode})
                             </div>
-                            <div className="text-slate-500">
+                            <div className="text-[10px] text-neutral-500">
                               {m.phone} {m.email ? `· ${m.email}` : ''}
                             </div>
                           </div>
                           <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${m.subsStatus === 'active'
+                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
                               ? 'bg-emerald-100 text-emerald-800'
                               : m.subsStatus === 'arrears'
                                 ? 'bg-amber-100 text-amber-800'
@@ -901,350 +1480,55 @@ export function BookingDeskClient({
                     </div>
                   )}
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    WhatsApp / Phone *
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="9847012345"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="member@example.com"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none"
-                  />
-                </div>
-              </div>
 
-              {/* Ticket Types × Phases */}
-              <div className="mt-6 border-t border-slate-100 pt-5">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                  <Ticket className="h-4 w-4 text-sky-600" />
-                  Select Tickets
-                </div>
-
-                {loadingMeta ? (
-                  <p className="mt-3 text-xs text-slate-500">Loading ticket phases…</p>
-                ) : phases.length === 0 ? (
-                  <p className="mt-3 text-xs text-amber-700">
-                    No active ticket phases configured for this event.
-                  </p>
-                ) : (
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    {phases.map((p) => {
-                      const qty = quantities[p.id] || 0
-                      return (
-                        <div
-                          key={p.id}
-                          className={`flex items-center justify-between rounded-lg border p-3 transition ${qty > 0
-                            ? 'border-sky-500 bg-sky-50/50'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-slate-900">
-                                {p.ticketTypeName}
-                              </span>
-                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
-                                {p.paxMultiplier} pax
-                              </span>
-                              {p.memberOnly && (
-                                <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
-                                  Member
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 text-xs text-slate-500">
-                              {p.phaseName} ·{' '}
-                              <strong className="text-slate-900">
-                                ₹{p.price.toLocaleString('en-IN')}
-                              </strong>
-                              {p.endsAt && (
-                                <span className="ml-1.5 text-[10px] text-slate-400">
-                                  (Ends{' '}
-                                  {new Date(p.endsAt).toLocaleDateString('en-IN', {
-                                    day: 'numeric',
-                                    month: 'short',
-                                  })}
-                                  )
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => adjustQty(p.id, -1)}
-                              className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                            >
-                              <Minus className="h-3.5 w-3.5" />
-                            </button>
-                            <span className="w-6 text-center text-sm font-bold text-slate-900">
-                              {qty}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => adjustQty(p.id, 1)}
-                              className="flex h-7 w-7 items-center justify-center rounded-md bg-sky-600 text-white hover:bg-sky-700"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-neutral-700">
+                      WhatsApp / Phone *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value)
+                        setPhoneTouched(true)
+                      }}
+                      placeholder="9847012345"
+                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none"
+                    />
                   </div>
-                )}
-              </div>
-
-              {/* Per-Ticket Required Pax Names with Inline Member Lookup */}
-              {expandedTicketGroups.length > 0 && (
-                <div className="mt-6 border-t border-slate-100 pt-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                      <Users className="h-4 w-4 text-sky-600" />
-                      Guest Names Required per Ticket ({totalPax} Pax)
-                    </div>
-                    <span className="text-[11px] text-slate-500">
-                      Type a guest name or pick a member from lookup
-                    </span>
-                  </div>
-
-                  <div className="mt-3 space-y-3">
-                    {expandedTicketGroups.map((grp) => (
-                      <div
-                        key={`${grp.phase.id}-${grp.ticketIdx}`}
-                        className="rounded-lg border border-slate-200 bg-slate-50/70 p-3"
-                      >
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-900">
-                            Ticket #{grp.displayIndex} · {grp.phase.ticketTypeName} (
-                            {grp.phase.phaseName})
-                          </span>
-                          <span className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 shadow-xs">
-                            {grp.phase.paxMultiplier} Pax
-                          </span>
-                        </div>
-
-                        <div className="grid gap-2.5 sm:grid-cols-2">
-                          {grp.paxKeys.map((paxKey, pIdx) => {
-                            const entry = getPaxEntry(paxKey)
-                            const isFocused = activePaxKey === paxKey
-                            const isFirst = paxKey === firstPaxKey
-
-                            return (
-                              <div key={paxKey} className="relative">
-                                <div className="mb-1 flex items-center justify-between">
-                                  <label className="text-[11px] font-medium text-slate-700">
-                                    Pax {pIdx + 1} Full Name *
-                                    {isFirst && !entry.touched && holderName.trim() && (
-                                      <span className="ml-1 text-[10px] text-sky-600">
-                                        (Auto-filled)
-                                      </span>
-                                    )}
-                                  </label>
-                                  {entry.memberId && (
-                                    <div className="flex items-center gap-1">
-                                      <span
-                                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${entry.subsStatus === 'active'
-                                          ? 'bg-emerald-100 text-emerald-800'
-                                          : entry.subsStatus === 'arrears'
-                                            ? 'bg-amber-100 text-amber-800'
-                                            : 'bg-rose-100 text-rose-800'
-                                          }`}
-                                      >
-                                        {entry.memberCode} · {entry.subsStatus}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => clearPaxMemberLink(paxKey)}
-                                        className="text-slate-400 hover:text-rose-600"
-                                        title="Unlink member"
-                                      >
-                                        <X className="h-3 w-3" />
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div className="relative">
-                                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                                  <input
-                                    type="text"
-                                    required
-                                    value={entry.name}
-                                    onFocus={() => setActivePaxKey(paxKey)}
-                                    onBlur={() =>
-                                      setTimeout(
-                                        () =>
-                                          setActivePaxKey((curr) =>
-                                            curr === paxKey ? null : curr,
-                                          ),
-                                        180,
-                                      )
-                                    }
-                                    onChange={(e) => updatePaxName(paxKey, e.target.value)}
-                                    placeholder={`Search member or type Pax ${pIdx + 1} name...`}
-                                    className={`w-full rounded-lg border bg-white py-1.5 pl-8 pr-3 text-xs focus:border-sky-500 focus:outline-none ${!entry.name.trim()
-                                      ? 'border-amber-300'
-                                      : 'border-slate-300'
-                                      }`}
-                                  />
-                                  {isFocused && searchingPax && (
-                                    <span className="absolute right-2.5 top-2 text-[10px] text-slate-400">
-                                      …
-                                    </span>
-                                  )}
-                                </div>
-
-                                {isFocused &&
-                                  !entry.memberId &&
-                                  visiblePaxMemberResults.length > 0 && (
-                                    <div className="absolute z-30 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                                      {visiblePaxMemberResults.map((m) => (
-                                        <button
-                                          key={m.id}
-                                          type="button"
-                                          onMouseDown={(e) => {
-                                            e.preventDefault()
-                                            selectPaxMember(paxKey, m)
-                                          }}
-                                          className="flex w-full items-center justify-between border-b border-slate-100 px-2.5 py-1.5 text-left text-[11px] hover:bg-sky-50"
-                                        >
-                                          <div>
-                                            <div className="font-semibold text-slate-900">
-                                              {m.fullName} ({m.memberCode})
-                                            </div>
-                                            <div className="text-[10px] text-slate-500">
-                                              {m.phone}
-                                            </div>
-                                          </div>
-                                          <span
-                                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
-                                              ? 'bg-emerald-100 text-emerald-800'
-                                              : m.subsStatus === 'arrears'
-                                                ? 'bg-amber-100 text-amber-800'
-                                                : 'bg-rose-100 text-rose-800'
-                                              }`}
-                                          >
-                                            {m.subsStatus}
-                                          </span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ))}
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-neutral-700">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value)
+                        setEmailTouched(true)
+                      }}
+                      placeholder="member@example.com"
+                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none"
+                    />
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* 2. Smart Table Allocation (Optional at booking time) */}
-            <div className="ticket-perforation pt-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                  <Users className="h-4 w-4 text-sky-600" />
-                  2. Smart Table Allocation (Optional — Can Assign Later)
-                </h2>
-                {totalPax > 0 && (
-                  <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">
-                    {tableEval.recommendationText}
-                  </span>
-                )}
               </div>
 
-              {tableEval.warningText && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                  {tableEval.warningText}
-                </div>
-              )}
-
-              <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
-                {tables.map((t) => {
-                  const isSelected = selectedTables.includes(t.tableLabel)
-                  return (
-                    <button
-                      key={t.tableLabel}
-                      type="button"
-                      disabled={t.isReserved}
-                      onClick={() => toggleTableSelection(t.tableLabel)}
-                      className={`flex flex-col items-start justify-between rounded-lg border p-3 text-left text-xs transition ${t.isReserved
-                        ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-                        : isSelected
-                          ? 'border-sky-600 bg-sky-50 text-slate-900 ring-1 ring-sky-600'
-                          : 'border-slate-200 bg-white text-slate-800 hover:border-sky-400'
-                        }`}
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <span className="text-sm font-bold">{t.tableLabel}</span>
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${t.isReserved
-                            ? 'bg-slate-200 text-slate-500'
-                            : isSelected
-                              ? 'bg-sky-600 text-white'
-                              : 'bg-slate-100 text-slate-700'
-                            }`}
-                        >
-                          {t.maxCapacity} seats
-                        </span>
-                      </div>
-                      <div className="mt-1 text-[11px] text-slate-500">{t.tableTypeName}</div>
-                      <div className="mt-1.5 text-[10px] font-semibold">
-                        {t.isReserved ? (
-                          <span className="text-rose-600">
-                            Reserved · {t.reservedByBookingCode}
-                          </span>
-                        ) : isSelected ? (
-                          <span className="text-sky-700">✓ Selected (Full Table)</span>
-                        ) : (
-                          <span className="text-emerald-700">Available — Click to reserve</span>
-                        )}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Payment & Instant Summary */}
-          <div className="space-y-4 pb-20 lg:pb-0">
-            <div ref={summaryCardRef} className="sticky top-20 rounded-3xl bg-slate-50/90 p-5">
-              <h2 className="text-sm font-bold text-slate-900">Booking Summary &amp; Payment</h2>
-
-              <div className="mt-4 space-y-2 border-b border-slate-100 pb-4 text-xs">
+              <div className="mt-4 space-y-2 border-b border-neutral-200/70 pb-4 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Total Guests (Pax)</span>
-                  <span className="font-bold text-slate-900">{totalPax}</span>
+                  <span className="text-neutral-500">Total Guests (Pax)</span>
+                  <span className="font-bold text-neutral-900">{totalPax}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Tables Assigned</span>
-                  <span className="font-semibold text-slate-900">
+                  <span className="text-neutral-500">Tables Assigned</span>
+                  <span className="font-semibold text-neutral-900">
                     {tableEval.totalAllocatedSeats} seats
                   </span>
                 </div>
                 <div className="flex justify-between pt-2 text-base">
-                  <span className="font-bold text-slate-900">Total Amount</span>
+                  <span className="font-bold text-neutral-900">Total Amount</span>
                   <span className="font-bold text-emerald-700">
                     ₹{totalAmount.toLocaleString('en-IN')}
                   </span>
@@ -1253,7 +1537,7 @@ export function BookingDeskClient({
 
               <div className="mt-4 space-y-3">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
+                  <label className="mb-1 block text-xs font-medium text-neutral-700">
                     Payment Mode
                   </label>
                   <select
@@ -1267,7 +1551,7 @@ export function BookingDeskClient({
                         | 'PAY_AT_DOOR',
                       )
                     }
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800"
                   >
                     <option value="CASH">Cash (Collected by Me)</option>
                     <option value="OFFICER_UPI">Officer UPI</option>
@@ -1277,7 +1561,7 @@ export function BookingDeskClient({
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
+                  <label className="mb-1 block text-xs font-medium text-neutral-700">
                     Notes (Optional)
                   </label>
                   <textarea
@@ -1285,20 +1569,35 @@ export function BookingDeskClient({
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="e.g. Vegetarian preference, wheelchair access..."
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:border-sky-500 focus:outline-none"
+                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs focus:border-neutral-900 focus:outline-none"
                   />
                 </div>
 
+                {totalPax > 0 && duplicatePaxCount > 0 && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700">
+                    {duplicatePaxCount} duplicate or already-booked attendee
+                    {duplicatePaxCount === 1 ? '' : 's'} — each ticket must have a unique guest.
+                  </div>
+                )}
+
                 {totalPax > 0 && missingPaxCount > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800">
-                    {missingPaxCount} guest name{missingPaxCount === 1 ? '' : 's'} required before confirming.
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800">
+                    {missingMemberCount > 0
+                      ? `Select a registered member for ${missingMemberCount} Member-Only ticket${missingMemberCount === 1 ? '' : 's'}.`
+                      : `${missingPaxCount} guest name${missingPaxCount === 1 ? '' : 's'} required before confirming.`}
                   </div>
                 )}
 
                 <button
                   type="submit"
-                  disabled={!canCreate || submitting || totalPax === 0 || missingPaxCount > 0}
-                  className="w-full rounded-lg bg-sky-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-50"
+                  disabled={
+                    !canCreate ||
+                    submitting ||
+                    totalPax === 0 ||
+                    missingPaxCount > 0 ||
+                    duplicatePaxCount > 0
+                  }
+                  className="w-full rounded-lg bg-neutral-900 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-neutral-800 disabled:opacity-50"
                 >
                   {submitting
                     ? 'Creating Master QR Booking…'
@@ -1310,12 +1609,12 @@ export function BookingDeskClient({
 
           {/* Zomato-Style Sticky Mobile Checkout Bar (shown when Booking Summary & Payment is out of view) */}
           {!isSummaryInView && (
-            <div className="fixed inset-x-0 bottom-19 z-30 border-t border-white/10 bg-slate-950/95 px-4 py-2.5 text-white shadow-2xl backdrop-blur-xl lg:hidden">
+            <div className="fixed inset-x-0 bottom-19 z-30 border-t border-white/10 bg-neutral-950/95 px-4 py-2.5 text-white shadow-2xl backdrop-blur-xl lg:hidden">
               <div className="mx-auto flex max-w-2xl items-center gap-3">
                 {/* Left: PAY USING ▲ + Payment Mode Picker */}
                 <div className="relative flex shrink-0 flex-col justify-center pr-1">
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    <span className="flex h-4 w-5 items-center justify-center rounded bg-white text-slate-950">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+                    <span className="flex h-4 w-5 items-center justify-center rounded bg-white text-neutral-950">
                       <Wallet className="h-3 w-3" />
                     </span>
                     <span>PAY USING</span>
@@ -1348,14 +1647,20 @@ export function BookingDeskClient({
                 {/* Right: Split Total Amount + Confirm Button */}
                 <button
                   type="submit"
-                  disabled={!canCreate || submitting || totalPax === 0 || missingPaxCount > 0}
-                  className="flex flex-1 items-center justify-between rounded-2xl bg-sky-500 px-4 py-2.5 text-slate-950 shadow-lg transition hover:bg-sky-400 active:scale-[0.99] disabled:opacity-45"
+                  disabled={
+                    !canCreate ||
+                    submitting ||
+                    totalPax === 0 ||
+                    missingPaxCount > 0 ||
+                    duplicatePaxCount > 0
+                  }
+                  className="flex flex-1 items-center justify-between rounded-2xl bg-white px-4 py-2.5 text-neutral-950 shadow-lg transition hover:bg-neutral-200 active:scale-[0.99] disabled:opacity-45"
                 >
                   <div className="text-left leading-tight">
                     <div className="text-base font-extrabold tracking-tight">
                       ₹{totalAmount.toLocaleString('en-IN')}
                     </div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-950/75">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-950/75">
                       TOTAL{totalPax > 0 ? ` · ${totalPax} PAX` : ''}
                     </div>
                   </div>
@@ -1370,9 +1675,9 @@ export function BookingDeskClient({
         </form>
       ) : (
         /* MANAGE BOOKINGS, PHYSICAL STUBS, TABLE EDITS, CANCEL/TRANSFER */
-        <div className="space-y-4">
+        <div className="space-y-4 pb-28">
           {manageMessage && (
-            <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-medium text-emerald-900">
+            <div className="flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-900">
               <span>{manageMessage}</span>
               <button type="button" onClick={() => setManageMessage(null)}>
                 <X className="h-4 w-4" />
@@ -1380,136 +1685,253 @@ export function BookingDeskClient({
             </div>
           )}
 
-          <div className="relative max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              value={manageSearch}
-              onChange={(e) => setManageSearch(e.target.value)}
-              placeholder="Find booking by B042, B042-T01, name, or phone..."
-              className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm"
-            />
+          {/* Compact Search + Quick Filter Pills */}
+          <div className="space-y-2.5">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-zinc-400" />
+              <input
+                type="text"
+                value={manageSearch}
+                onChange={(e) => setManageSearch(e.target.value)}
+                placeholder="Search code, holder, guest name, or phone..."
+                className="w-full rounded-2xl border border-zinc-200 bg-zinc-50/70 py-2.5 pl-10 pr-4 text-sm text-zinc-900 placeholder-zinc-400 transition focus:border-zinc-900 focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { key: 'all', label: `All (${eventRecentBookings.length})` },
+                  {
+                    key: 'unissued',
+                    label: `Unissued (${eventRecentBookings.filter((b) => b.status !== 'cancelled' && b.tickets.some((t) => !t.physicalIssued)).length})`,
+                  },
+                  {
+                    key: 'no_table',
+                    label: `No Table (${eventRecentBookings.filter((b) => b.status !== 'cancelled' && (!b.assignedTableLabels || b.assignedTableLabels.length === 0)).length})`,
+                  },
+                ] as const
+              ).map((pill) => (
+                <button
+                  key={pill.key}
+                  type="button"
+                  onClick={() => setManageFilter(pill.key)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${manageFilter === pill.key
+                    ? 'bg-zinc-900 text-white'
+                    : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200/80'
+                    }`}
+                >
+                  {pill.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="divide-y divide-dashed divide-slate-200">
-            {filteredRecent.map((b) => (
-              <div
-                key={b.id}
-                className="py-5 first:pt-2"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">
-                        {b.bookingCode}
-                      </span>
-                      <span className="text-sm font-semibold text-slate-700">
-                        {b.holderName}
-                      </span>
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${b.status === 'confirmed'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : b.status === 'transferred'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-rose-100 text-rose-800'
-                          }`}
-                      >
-                        {b.status}
-                      </span>
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {b.phone} · {b.totalPax} Pax · ₹{b.totalAmount.toLocaleString('en-IN')} (
-                      {b.paymentMode}) · Tables: <strong>{b.tablesSummary}</strong>
-                    </div>
-                  </div>
+          {filteredRecent.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/70 px-4 py-12 text-center">
+              <Ticket className="mx-auto h-7 w-7 text-zinc-300" />
+              <p className="mt-2 text-sm font-semibold text-zinc-700">No matching bookings</p>
+              <p className="mt-0.5 text-xs text-zinc-400">
+                Try clearing your search or switching the filter above.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredRecent.map((b) => {
+                const issuedCount = b.tickets.filter((t) => t.physicalIssued).length
+                const hasTables = Boolean(b.assignedTableLabels && b.assignedTableLabels.length > 0)
 
-                  {canCreate && b.status !== 'cancelled' && (
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingTablesFor(b)
-                          setEditSelectedTables(b.assignedTableLabels || [])
-                        }}
-                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        Assign / Edit Tables
-                      </button>
-                      {/* <button
-                        type="button"
-                        onClick={() => handleTransferBooking(b)}
-                        className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
-                      >
-                        Transfer
-                      </button> */}
-                      <button
-                        type="button"
-                        onClick={() => handleCancelBooking(b.id)}
-                        className="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Physical Ticket Stubs */}
-                {b.tickets.length > 0 && (
-                  <div className="pt-3">
-                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      Ticket Stubs
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {b.tickets.map((t) => (
-                        <div
-                          key={t.id}
-                          className="flex flex-col items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden"
-                        >
-                          <div className="flex flex-col w-full p-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-slate-900">{t.ticketCode}</span>
-                              {t.ticketTypeName && (
-                                <span className="rounded bg-slate-200/70 px-1.5 py-0.5 text-sm font-semibold text-slate-700">
-                                  {t.ticketTypeName} · {t.paxCount} PAX
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 truncate text-sm font-medium text-slate-600">
-                              <div className='flex flex-col'>
-                                {t.paxNames && t.paxNames.length > 0
-                                  ? t.paxNames.map((name, i) => (
-                                    <span key={i}>{name}</span>
-                                  ))
-                                  : b.holderName}
-                              </div>
-                            </div>
+                return (
+                  <div
+                    key={b.id}
+                    className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white ${b.status === 'cancelled' ? 'opacity-65' : ''
+                      }`}
+                  >
+                    {/* Booking Header */}
+                    <div className="px-4 py-3.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[15px] font-bold leading-snug text-zinc-900">
+                              {b.holderName}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${b.status === 'confirmed'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : b.status === 'transferred'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-rose-100 text-rose-800'
+                                }`}
+                            >
+                              {b.status}
+                            </span>
                           </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500 tabular-nums">
+                            <span className="font-semibold text-zinc-800">{b.bookingCode}</span>
+                            <span>·</span>
+                            <span>{b.phone}</span>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-right tabular-nums">
+                          <div className="text-sm font-bold text-zinc-900">
+                            ₹{b.totalAmount.toLocaleString('en-IN')}
+                          </div>
+                          <div className="text-[11px] font-medium text-zinc-500">
+                            {b.totalPax} pax · {b.paymentMode}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Compact Status Chips: Table + Stubs Progress */}
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span
+                          className={`rounded-md px-2 py-0.5 font-semibold ${hasTables
+                            ? 'bg-zinc-100 text-zinc-800'
+                            : 'bg-amber-50 text-amber-700'
+                            }`}
+                        >
+                          Table: {b.tablesSummary}
+                        </span>
+                        <span
+                          className={`rounded-md px-2 py-0.5 font-semibold tabular-nums ${issuedCount === b.tickets.length && b.tickets.length > 0
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-zinc-100 text-zinc-600'
+                            }`}
+                        >
+                          Stubs: {issuedCount}/{b.tickets.length}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Compact Grouped Ticket Stubs List (Left Info / Right Action) */}
+                    {b.tickets.length > 0 && (
+                      <div className="divide-y divide-zinc-100 border-t border-zinc-100 bg-zinc-50/50">
+                        {b.tickets.map((t) => {
+                          const shortStub = t.ticketCode.split('-').pop() || t.ticketCode
+                          return (
+                            <div
+                              key={t.id}
+                              className="flex items-center justify-between gap-3 px-4 py-2.5"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="rounded bg-zinc-200/70 px-1.5 py-0.5 font-mono text-[10px] font-bold text-zinc-800">
+                                    {shortStub}
+                                  </span>
+                                  {t.ticketTypeName && (
+                                    <span className="text-xs font-semibold text-zinc-900">
+                                      {t.ticketTypeName}
+                                    </span>
+                                  )}
+                                  <span className="text-[11px] text-zinc-500">
+                                    · {t.paxCount} pax
+                                  </span>
+                                </div>
+                                <div className="mt-0.5 truncate text-xs text-zinc-600">
+                                  {t.paxNames && t.paxNames.length > 0
+                                    ? t.paxNames.join(', ')
+                                    : b.holderName}
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={!canCreate || b.status === 'cancelled'}
+                                onClick={() => handleTogglePhysical(b.id, t.id, t.physicalIssued)}
+                                aria-label={
+                                  t.physicalIssued
+                                    ? `Unmark ${t.ticketCode} as issued`
+                                    : `Mark ${t.ticketCode} as issued`
+                                }
+                                className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-xl px-3 text-xs font-semibold transition disabled:opacity-45 ${t.physicalIssued
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  : 'border border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-100'
+                                  }`}
+                              >
+                                {t.physicalIssued ? (
+                                  <>
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    Issued
+                                  </>
+                                ) : (
+                                  <>
+                                    <Printer className="h-3.5 w-3.5 text-zinc-500" />
+                                    Issue
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {/* Compact Action Footer */}
+                    {b.status !== 'cancelled' && (
+                      <div className="flex items-center justify-between gap-2 border-t border-zinc-100 bg-white px-3 py-2">
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
-                            disabled={!canCreate}
-                            onClick={() => handleTogglePhysical(b.id, t.id, t.physicalIssued)}
-                            className={`w-full border-0 inline-flex items-center gap-1 px-2.5 py-2 text-[11px] font-semibold ${t.physicalIssued
-                              ? 'bg-emerald-600 text-white'
-                              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
-                              }`}
+                            onClick={() =>
+                              setReceipt({
+                                bookingId: b.id,
+                                bookingCode: b.bookingCode,
+                                holderName: b.holderName,
+                                totalPax: b.totalPax,
+                                totalAmount: b.totalAmount,
+                                tablesSummary: b.tablesSummary,
+                                tickets: b.tickets.map((t) => ({
+                                  id: t.id,
+                                  ticketCode: t.ticketCode,
+                                  paxCount: t.paxCount,
+                                  paxNames: t.paxNames,
+                                })),
+                              })
+                            }
+                            className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800"
                           >
-                            <Printer className="h-3 w-3" />
-                            {t.physicalIssued ? 'Issued' : 'Mark Issued'}
+                            <QrCode className="h-3.5 w-3.5" />
+                            QR Pass
                           </button>
+
+                          {canCreate && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTablesFor(b)
+                                setEditSelectedTables(b.assignedTableLabels || [])
+                              }}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-100"
+                            >
+                              <Users className="h-3.5 w-3.5 text-zinc-500" />
+                              {hasTables ? 'Edit Tables' : 'Assign Table'}
+                            </button>
+                          )}
                         </div>
-                      ))}
-                    </div>
+
+                        {canCreate && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelBooking(b.id)}
+                            className="h-8 rounded-xl px-2.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-50"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
       {/* POST-BOOKING RECEIPT & MASTER QR MODAL (Dark Frosted Glass Ticket Pass) */}
       {receipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/75 p-4 backdrop-blur-sm">
           <div className="glass-surface w-full max-w-sm overflow-hidden rounded-3xl p-6 text-white shadow-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-emerald-300">
@@ -1531,31 +1953,26 @@ export function BookingDeskClient({
               <div className="text-xl font-extrabold tracking-tight text-white">
                 {events.find((e) => e.id === selectedEventId)?.name || receipt.holderName}
               </div>
-              <div className="mt-1 text-xs text-slate-300/80">
+              <div className="mt-1 text-xs text-neutral-300/80">
                 Show this QR code at the event entrance
               </div>
-              <div className="mt-1 text-xs font-semibold text-slate-200">
+              <div className="mt-1 text-xs font-semibold text-neutral-200">
                 Ticket: {receipt.bookingCode} · {receipt.holderName} ({receipt.totalPax} Pax)
               </div>
 
               <div className="my-5 flex justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/qr/${encodeURIComponent(receipt.bookingCode)}?style=qr&v=2`}
-                  alt="Master QR"
-                  className="h-56 w-56"
-                />
+                <QrPassImage key={receipt.bookingCode} bookingCode={receipt.bookingCode} />
               </div>
 
               {/* White Inset Info Card (Inspired by Reference Ticket Pass) */}
-              <div className="rounded-2xl bg-white p-3.5 text-left text-xs text-slate-800 shadow-sm">
-                <div className="flex items-center justify-between border-b border-dashed border-slate-200 pb-2">
+              <div className="rounded-2xl bg-white p-3.5 text-left text-xs text-neutral-800 shadow-sm">
+                <div className="flex items-center justify-between border-b border-dashed border-neutral-200 pb-2">
                   <div>
-                    <div className="text-[10px] font-medium text-slate-400">Tables</div>
-                    <div className="font-bold text-slate-900">{receipt.tablesSummary}</div>
+                    <div className="text-[10px] font-medium text-neutral-400">Tables</div>
+                    <div className="font-bold text-neutral-900">{receipt.tablesSummary}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[10px] font-medium text-slate-400">Total</div>
+                    <div className="text-[10px] font-medium text-neutral-400">Total</div>
                     <div className="font-extrabold text-emerald-700">
                       ₹{receipt.totalAmount.toLocaleString('en-IN')}
                     </div>
@@ -1563,8 +1980,8 @@ export function BookingDeskClient({
                 </div>
                 <div className="mt-2 space-y-1">
                   {receipt.tickets.map((t) => (
-                    <div key={t.id} className="text-[11px] text-slate-600">
-                      <strong className="text-slate-900">{t.ticketCode}:</strong>{' '}
+                    <div key={t.id} className="text-[11px] text-neutral-600">
+                      <strong className="text-neutral-900">{t.ticketCode}:</strong>{' '}
                       {t.paxNames && t.paxNames.length > 0
                         ? t.paxNames.join(', ')
                         : `${t.paxCount} pax`}
@@ -1592,7 +2009,7 @@ export function BookingDeskClient({
               <button
                 type="button"
                 onClick={() => setReceipt(null)}
-                className="flex-1 rounded-2xl bg-white px-3 py-2.5 text-xs font-bold text-slate-950 hover:bg-slate-100"
+                className="flex-1 rounded-2xl bg-white px-3 py-2.5 text-xs font-bold text-neutral-950 hover:bg-neutral-100"
               >
                 Done
               </button>
@@ -1603,14 +2020,14 @@ export function BookingDeskClient({
 
       {/* EDIT TABLES MODAL */}
       {editingTablesFor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900">
+              <h3 className="text-base font-bold text-neutral-900">
                 Assign Tables · {editingTablesFor.bookingCode} ({editingTablesFor.totalPax} Pax)
               </h3>
               <button type="button" onClick={() => setEditingTablesFor(null)}>
-                <X className="h-4 w-4 text-slate-400" />
+                <X className="h-4 w-4 text-neutral-400" />
               </button>
             </div>
 
@@ -1626,24 +2043,24 @@ export function BookingDeskClient({
                     disabled={reservedByOther}
                     onClick={() => toggleEditTableSelection(t.tableLabel)}
                     className={`flex flex-col items-start justify-between rounded-lg border p-2.5 text-left text-xs transition ${reservedByOther
-                      ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                      ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400'
                       : isSelected
-                        ? 'border-sky-600 bg-sky-50 text-slate-900 ring-1 ring-sky-600'
-                        : 'border-slate-200 bg-white text-slate-800 hover:border-sky-400'
+                        ? 'border-neutral-900 bg-neutral-100 text-neutral-900 ring-1 ring-neutral-900'
+                        : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-500'
                       }`}
                   >
                     <div className="flex w-full items-center justify-between">
                       <span className="font-bold">{t.tableLabel}</span>
                       <span className="text-[10px] font-semibold">{t.maxCapacity}p</span>
                     </div>
-                    <div className="text-[10px] text-slate-500">{t.tableTypeName}</div>
+                    <div className="text-[10px] text-neutral-500">{t.tableTypeName}</div>
                     <div className="mt-1 text-[10px] font-semibold">
                       {reservedByOther ? (
                         <span className="text-rose-600">
                           Reserved ({t.reservedByBookingCode})
                         </span>
                       ) : isSelected ? (
-                        <span className="text-sky-700">✓ Selected</span>
+                        <span className="text-neutral-900">✓ Selected</span>
                       ) : (
                         <span className="text-emerald-700">Available</span>
                       )}
@@ -1653,7 +2070,7 @@ export function BookingDeskClient({
               })}
             </div>
 
-            <label className="mt-4 flex items-center gap-2 text-xs font-medium text-slate-700">
+            <label className="mt-4 flex items-center gap-2 text-xs font-medium text-neutral-700">
               <input
                 type="checkbox"
                 checked={editResend}
@@ -1666,14 +2083,14 @@ export function BookingDeskClient({
               <button
                 type="button"
                 onClick={() => setEditingTablesFor(null)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700"
+                className="rounded-lg border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveTableUpdate}
-                className="rounded-lg bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-700"
+                className="rounded-lg bg-neutral-900 px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800"
               >
                 Save Seating
               </button>
@@ -1681,6 +2098,66 @@ export function BookingDeskClient({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function QrPassImage({ bookingCode }: { bookingCode: string }) {
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
+  const [retryCount, setRetryCount] = useState(0)
+
+  const src = `/api/qr/${encodeURIComponent(bookingCode)}?style=qr&v=2${retryCount > 0 ? `&r=${retryCount}` : ''}`
+
+  return (
+    <div className="relative flex h-56 w-56 items-center justify-center overflow-hidden rounded-2xl">
+      {status === 'loading' && (
+        <div
+          role="status"
+          aria-label="Loading QR code"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5"
+        >
+          {/* Subtle pulsing QR finder-corner skeleton */}
+          <div className="pointer-events-none absolute inset-5 animate-pulse">
+            <div className="absolute left-0 top-0 h-8 w-8 rounded-lg border-[3px] border-white/15" />
+            <div className="absolute right-0 top-0 h-8 w-8 rounded-lg border-[3px] border-white/15" />
+            <div className="absolute bottom-0 left-0 h-8 w-8 rounded-lg border-[3px] border-white/15" />
+            <div className="absolute bottom-2 right-2 h-5 w-5 rounded bg-white/10" />
+          </div>
+          <Loader2 className="h-7 w-7 animate-spin text-emerald-300" />
+          <span className="text-[11px] font-medium tracking-wide text-neutral-300">
+            Loading QR…
+          </span>
+        </div>
+      )}
+
+      {status === 'error' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-center">
+          <AlertTriangle className="h-6 w-6 text-rose-300" />
+          <span className="text-xs font-semibold text-rose-200">
+            Couldn&apos;t load QR
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setStatus('loading')
+              setRetryCount((c) => c + 1)
+            }}
+            className="mt-1 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-white/25"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        key={retryCount}
+        src={src}
+        alt="Master QR"
+        onLoad={() => setStatus('loaded')}
+        onError={() => setStatus('error')}
+        className={`h-56 w-56 transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+      />
     </div>
   )
 }

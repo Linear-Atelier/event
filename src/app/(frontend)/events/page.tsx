@@ -13,7 +13,7 @@ async function loadEventListItems(user: NonNullable<Awaited<ReturnType<typeof ge
     collection: 'events',
     user,
     overrideAccess: false,
-    sort: '-date',
+    sort: 'date',
     limit: 50,
     depth: 0,
   })
@@ -43,6 +43,8 @@ async function loadEventListItems(user: NonNullable<Awaited<ReturnType<typeof ge
         date: ev.date,
         venue: ev.venue,
         color: ev.color || 'sky',
+        icon: ev.icon || null,
+        iconSvg: ev.iconSvg || null,
         isPast: !Number.isNaN(evMs) && evMs < cutoffMs,
         bookingCount: bookings.totalDocs,
         totalPax: bookings.docs.reduce((s, b) => s + (b.totalPax || 0), 0),
