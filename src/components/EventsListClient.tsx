@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Calendar, MapPin, QrCode, Ticket, Users } from 'lucide-react'
+import { getEventColorTheme } from '@/lib/event-colors'
 
 export interface EventListItem {
   id: number
@@ -10,6 +11,8 @@ export interface EventListItem {
   name: string
   date: string
   venue: string
+  color?: string | null
+  isPast: boolean
   bookingCount: number
   totalPax: number
   totalRevenue: number
@@ -19,12 +22,7 @@ export function EventsListClient({ events }: { events: EventListItem[] }) {
   const [filter, setFilter] = useState<'upcoming' | 'past'>('upcoming')
 
   const filtered = useMemo(() => {
-    const now = Date.now()
-    return events.filter((ev) => {
-      const evMs = new Date(ev.date).getTime()
-      const isPast = !Number.isNaN(evMs) && evMs < now - 24 * 60 * 60 * 1000
-      return filter === 'upcoming' ? !isPast : isPast
-    })
+    return events.filter((ev) => (filter === 'upcoming' ? !ev.isPast : ev.isPast))
   }, [events, filter])
 
   return (
@@ -38,22 +36,20 @@ export function EventsListClient({ events }: { events: EventListItem[] }) {
         <button
           type="button"
           onClick={() => setFilter('upcoming')}
-          className={`rounded-xl py-2.5 text-xs font-bold transition ${
-            filter === 'upcoming'
-              ? 'bg-white text-slate-950 shadow-xs'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
+          className={`rounded-xl py-2.5 text-xs font-bold transition ${filter === 'upcoming'
+            ? 'bg-white text-slate-950 shadow-xs'
+            : 'text-slate-500 hover:text-slate-800'
+            }`}
         >
-          Future events
+          Upcoming events
         </button>
         <button
           type="button"
           onClick={() => setFilter('past')}
-          className={`rounded-xl py-2.5 text-xs font-bold transition ${
-            filter === 'past'
-              ? 'bg-white text-slate-950 shadow-xs'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
+          className={`rounded-xl py-2.5 text-xs font-bold transition ${filter === 'past'
+            ? 'bg-white text-slate-950 shadow-xs'
+            : 'text-slate-500 hover:text-slate-800'
+            }`}
         >
           Past events
         </button>
@@ -71,80 +67,83 @@ export function EventsListClient({ events }: { events: EventListItem[] }) {
         </div>
       ) : (
         <div className="space-y-6">
-          {filtered.map((ev) => (
-            <div
-              key={ev.id}
-              className="overflow-hidden rounded-3xl bg-slate-50/70 p-5 transition hover:bg-slate-50"
-            >
-              {/* Frosted Dark Header Banner Accent */}
-              <div className="glass-surface mb-4 flex items-center justify-between rounded-2xl px-4 py-3.5 text-white">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-sky-300">
-                    {ev.code}
-                  </span>
-                  <div className="mt-0.5 text-sm font-bold">{ev.name}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-extrabold text-emerald-300">
-                    ₹{ev.totalRevenue.toLocaleString('en-IN')}
+          {filtered.map((ev) => {
+            const theme = getEventColorTheme(ev.color)
+            return (
+              <div
+                key={ev.id}
+                className={`flex flex-col gap-4 overflow-hidden rounded-3xl border p-5 ${theme.cardBg} ${theme.cardBorder}`}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-bold text-slate-950">{ev.name}</div>
+                    <span
+                      className={`mt-1 inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest ${theme.badgeBg} ${theme.badgeText}`}
+                    >
+                      {ev.code}
+                    </span>
                   </div>
-                  <div className="text-[10px] text-slate-300">
-                    {ev.bookingCount} bookings
+                  <div className="text-right">
+                    <div className="text-sm font-extrabold text-slate-950">
+                      ₹{ev.totalRevenue.toLocaleString('en-IN')}
+                    </div>
+                    <div className="text-[10px] text-neutral-600">
+                      {ev.bookingCount} bookings
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="space-y-1.5 px-1">
-                <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                  <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                  {ev.venue}
+                <div className="space-y-1.5 px-1">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <MapPin className={`h-3.5 w-3.5 ${theme.iconText}`} />
+                    {ev.venue}
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-slate-700">
+                      {new Date(ev.date).toLocaleString('en-IN', {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
+                      <Users className={`h-3.5 w-3.5 ${theme.iconText}`} />
+                      {ev.totalPax} pax
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-slate-700">
-                    {new Date(ev.date).toLocaleString('en-IN', {
-                      weekday: 'short',
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                  <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
-                    <Users className="h-3.5 w-3.5 text-sky-600" />
-                    {ev.totalPax} pax
-                  </span>
+
+                {/* Bottom Action Bar */}
+                <div className="flex flex-wrap items-stretch gap-2">
+                  <Link
+                    href={`/events/${ev.id}`}
+                    className={`flex-1 whitespace-nowrap rounded-2xl bg-white p-4 text-center text-sm font-bold shadow-xs transition hover:bg-white/80 `}
+                  >
+                    View Dashboard
+                  </Link>
+                  <Link
+                    href={`/desk?eventId=${ev.id}`}
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-2xl bg-white p-4 shadow-xs transition hover:bg-white/80 ${theme.accentText}`}
+                    title="New Booking"
+                  >
+                    <Ticket className="h-5 w-5" /> Book
+                  </Link>
+                  <Link
+                    href={`/scan?eventId=${ev.id}`}
+                    className={`flex w-full flex-1 items-center justify-center gap-2 rounded-2xl p-4 text-white transition hover:bg-neutral-800`}
+                    style={{ backgroundColor: `${theme.hex}` }}
+                    title="Gate QR Scanner"
+                  >
+                    <QrCode className="h-5 w-5" /> Scan
+                  </Link>
                 </div>
               </div>
-
-              {/* Ticket Perforation Divider */}
-              <div className="ticket-perforation my-4" />
-
-              {/* Bottom Action Bar (Matching White Screenshot) */}
-              <div className="flex items-center gap-2">
-                <Link
-                  href={`/events/${ev.id}`}
-                  className="flex-1 rounded-2xl bg-white py-2.5 text-center text-xs font-bold text-sky-700 shadow-xs transition hover:bg-sky-50"
-                >
-                  Open Event Dashboard
-                </Link>
-                <Link
-                  href={`/desk?eventId=${ev.id}`}
-                  className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-xs transition hover:bg-slate-100"
-                  title="New Booking"
-                >
-                  <Ticket className="h-4 w-4" />
-                </Link>
-                <Link
-                  href={`/scan?eventId=${ev.id}`}
-                  className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-100 text-sky-700 transition hover:bg-sky-200"
-                  title="Gate QR Scanner"
-                >
-                  <QrCode className="h-4 w-4" />
-                </Link>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

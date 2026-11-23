@@ -1,6 +1,7 @@
 import type { CollectionConfig } from 'payload'
 import { fieldNeverReadable, isAuthenticated, isSuperAdmin } from '../access/roles'
 import { generateEventKeyPair } from '../lib/crypto'
+import { EVENT_COLOR_OPTIONS } from '../lib/event-colors'
 
 export const Events: CollectionConfig = {
   slug: 'events',
@@ -53,6 +54,17 @@ export const Events: CollectionConfig = {
       name: 'venue',
       type: 'text',
       required: true,
+    },
+    {
+      name: 'color',
+      type: 'select',
+      label: 'Event Theme Color',
+      defaultValue: 'sky',
+      options: EVENT_COLOR_OPTIONS,
+      admin: {
+        position: 'sidebar',
+        description: 'Pick an accent color for this event card and badges across the portal.',
+      },
     },
     {
       name: 'phases',

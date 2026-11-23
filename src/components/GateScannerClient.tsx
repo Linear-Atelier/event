@@ -893,7 +893,7 @@ export function GateScannerClient({
 
 
       {/* Offline Manual Lookup (Dark Frosted Glass Sheet at Bottom) */}
-      <div className="glass-surface border-t border-white/15 px-4 py-4 pb-6 text-white">
+      <div className="glass-surface px-4 py-4 pb-6 text-white">
         <h2 className="text-sm font-bold text-white">
           Manual Lookup
         </h2>

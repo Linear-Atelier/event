@@ -315,6 +315,10 @@ export interface Event {
   date: string;
   venue: string;
   /**
+   * Pick an accent color for this event card and badges across the portal.
+   */
+  color?: ('sky' | 'emerald' | 'rose' | 'amber' | 'indigo' | 'violet' | 'teal' | 'slate') | null;
+  /**
    * Define each pricing phase (e.g. Early-Bird, Phase 1, Door Sales) with optional auto-start/end dates, and select reusable Ticket Types from the dropdown.
    */
   phases?:
@@ -800,6 +804,7 @@ export interface EventsSelect<T extends boolean = true> {
   name?: T;
   date?: T;
   venue?: T;
+  color?: T;
   phases?:
     | T
     | {

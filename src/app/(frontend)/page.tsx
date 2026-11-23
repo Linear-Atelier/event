@@ -12,6 +12,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { getServerUser } from '@/lib/auth'
+import { getEventColorTheme } from '@/lib/event-colors'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,6 +46,7 @@ export default async function HomePage() {
   const totalPax = bookingsRes.docs.reduce((sum, b) => sum + (b.totalPax || 0), 0)
   const totalRevenue = bookingsRes.docs.reduce((sum, b) => sum + (b.totalAmount || 0), 0)
   const nextEvent = eventsRes.docs[0] || null
+  const nextEventTheme = getEventColorTheme(nextEvent?.color)
   const firstName = (user.name || user.email || 'Committee').split(' ')[0]
 
   const tiles = [
@@ -157,18 +159,18 @@ export default async function HomePage() {
           </div>
 
           <div className="glass-surface relative overflow-hidden rounded-3xl p-5 text-white shadow-xl">
-            <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-sky-500/15 blur-2xl" />
+            <div className={`pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full blur-2xl ${nextEventTheme.glassGlow}`} />
 
             <div className="relative flex items-start justify-between gap-3">
               <div>
-                <span className="inline-block rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-bold tracking-wider text-sky-300 backdrop-blur-md">
+                <span className={`inline-block rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-bold tracking-wider backdrop-blur-md ${nextEventTheme.glassAccentText}`}>
                   {nextEvent.code}
                 </span>
                 <h3 className="mt-2.5 text-lg font-bold tracking-tight text-white">
                   {nextEvent.name}
                 </h3>
                 <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-300">
-                  <MapPin className="h-3.5 w-3.5 text-sky-400" />
+                  <MapPin className={`h-3.5 w-3.5 ${nextEventTheme.glassAccentText}`} />
                   {nextEvent.venue}
                 </div>
                 <div className="mt-2 text-xs font-medium text-slate-400">
