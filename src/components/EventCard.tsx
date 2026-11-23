@@ -1,7 +1,8 @@
 import React from 'react'
 import Link from 'next/link'
-import { Calendar, MapPin, QrCode, Sparkles, Ticket } from 'lucide-react'
+import { Calendar, Lock, MapPin, QrCode, Sparkles, Ticket } from 'lucide-react'
 import { getEventColorTheme } from '@/lib/event-colors'
+import { formatEventDayLabel } from '@/lib/event-date'
 
 export interface EventListItem {
   id: number
@@ -13,6 +14,7 @@ export interface EventListItem {
   icon?: string | null
   iconSvg?: string | null
   isPast: boolean
+  isScanOpen?: boolean
   bookingCount: number
   totalPax: number
   totalRevenue: number
@@ -102,7 +104,7 @@ export function EventCard({ event: ev }: { event: EventListItem }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link
             href={`/events/${ev.id}`}
-            className="flex flex-1 items-center justify-center rounded-full bg-white px-4 py-4 text-xs font-bold text-neutral-700 shadow-xs ring-1 ring-neutral-200/80 transition hover:bg-neutral-50"
+            className="flex w-full items-center justify-center rounded-full bg-white px-4 py-4 text-xs font-bold text-neutral-700 shadow-xs ring-1 ring-neutral-200/80 transition hover:bg-neutral-50"
           >
             Dashboard
           </Link>
@@ -114,14 +116,27 @@ export function EventCard({ event: ev }: { event: EventListItem }) {
             <Ticket className="h-3.5 w-3.5" />
             Book
           </Link>
-          <Link
-            href={`/scan?eventId=${ev.id}`}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-neutral-950 px-4 py-4 text-xs font-bold text-white shadow-xs transition hover:bg-neutral-800"
-            title="Gate QR Scanner"
-          >
-            <QrCode className="h-3.5 w-3.5" />
-            Scan
-          </Link>
+          {ev.isScanOpen === false ? (
+            <button
+              type="button"
+              disabled
+              className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded-full bg-neutral-100 px-4 py-4 text-xs font-bold text-neutral-400 ring-1 ring-neutral-200/80"
+              title={`Gate scan opens on ${formatEventDayLabel(ev.date)}`}
+            >
+              <Lock className="h-3.5 w-3.5" />
+              Scan
+            </button>
+          ) : (
+            <Link
+              href={`/scan?eventId=${ev.id}`}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-4 text-xs text-white font-bold shadow-xs transition`}
+              title="Gate QR Scanner"
+              style={{ backgroundColor: theme.hex }}
+            >
+              <QrCode className="h-3.5 w-3.5" />
+              Scan
+            </Link>
+          )}
         </div>
       </div>
     </div>

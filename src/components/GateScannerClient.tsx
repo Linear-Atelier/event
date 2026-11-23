@@ -23,6 +23,7 @@ import {
   type CachedEvent,
   type CachedSlot,
 } from '@/lib/offline-db'
+import { formatEventDayLabel } from '@/lib/event-date'
 import { parseQRJson, verifyQRSignatureOffline } from '@/lib/qr-verify'
 import type {
   GateSyncWorkerInMessage,
@@ -35,6 +36,7 @@ interface EventOption {
   name: string
   date: string
   venue: string
+  isScanOpen?: boolean
 }
 
 interface DoorPhaseOption {
@@ -68,6 +70,8 @@ export function GateScannerClient({
   const [selectedEventId, setSelectedEventId] = useState<number>(
     initialEventId || events[0]?.id || 0,
   )
+  const selectedEvent = events.find((e) => e.id === selectedEventId) || null
+  const isScanOpen = selectedEvent?.isScanOpen !== false
   const isOnline = useSyncExternalStore(
     (onStoreChange) => {
       window.addEventListener('online', onStoreChange)
@@ -312,7 +316,7 @@ export function GateScannerClient({
       setSigStatus(verification)
       setScanMethod(method)
     },
-    [],
+    [setActiveBooking, setCheckedSlotIds],
   )
 
   // Handle decoded QR string
@@ -401,9 +405,9 @@ export function GateScannerClient({
     }
   }, [handleQrDecoded, stopCamera])
 
-  // Auto-open camera on mount if camera permission is already granted
+  // Auto-open camera on mount if camera permission is already granted (only when scan is open)
   useEffect(() => {
-    if (tab !== 'scan' || userStoppedCameraRef.current) return
+    if (tab !== 'scan' || !isScanOpen || userStoppedCameraRef.current) return
     if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
 
     let cancelled = false
@@ -419,7 +423,7 @@ export function GateScannerClient({
     return () => {
       cancelled = true
     }
-  }, [tab, startCamera])
+  }, [tab, isScanOpen, startCamera])
 
   useEffect(() => {
     return () => stopCamera()
@@ -610,7 +614,14 @@ export function GateScannerClient({
 
           <select
             value={selectedEventId}
-            onChange={(e) => setSelectedEventId(Number(e.target.value))}
+            onChange={(e) => {
+              const nextId = Number(e.target.value)
+              const nextEv = events.find((ev) => ev.id === nextId)
+              if (nextEv?.isScanOpen === false) {
+                stopCamera()
+              }
+              setSelectedEventId(nextId)
+            }}
             className="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-white"
           >
             {events.map((ev) => (
@@ -701,6 +712,19 @@ export function GateScannerClient({
                     Stop Camera
                   </button>
                 </div>
+              </div>
+            ) : !isScanOpen ? (
+              <div className="flex flex-col items-center justify-center px-6 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-neutral-300">
+                  <Lock className="h-5 w-5" />
+                </div>
+                <p className="mt-3 text-sm font-bold text-white">
+                  Gate Check-In Opens on{' '}
+                  {selectedEvent ? formatEventDayLabel(selectedEvent.date) : 'Event Day'}
+                </p>
+                <p className="mt-1 max-w-xs text-xs text-neutral-400">
+                  Scanning is disabled until the date of the event. You can still tap Sync above to pre-download the offline roster.
+                </p>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center px-6 text-center">

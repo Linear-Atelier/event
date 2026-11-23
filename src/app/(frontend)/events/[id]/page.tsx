@@ -4,6 +4,7 @@ import { getPayload } from 'payload'
 import { sql } from '@payloadcms/db-postgres/drizzle'
 import config from '@payload-config'
 import { getServerUser } from '@/lib/auth'
+import { isScanAllowedForEventDate } from '@/lib/event-date'
 import { expandEventTables } from '@/lib/event-tables'
 import {
   EventDashboardClient,
@@ -247,6 +248,7 @@ export default async function EventDetailPage(props: {
           date: event.date,
           venue: event.venue,
           publicKey: event.publicKey,
+          isScanOpen: isScanAllowedForEventDate(event.date),
         }}
         bookings={bookingRows}
         tables={tableCards}

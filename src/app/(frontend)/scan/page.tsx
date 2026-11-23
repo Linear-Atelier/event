@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import { getServerUser, userHasRole } from '@/lib/auth'
+import { getISTDateKey, isScanAllowedForEventDate } from '@/lib/event-date'
 import { GateScannerClient } from '@/components/GateScannerClient'
 
 export const dynamic = 'force-dynamic'
@@ -20,12 +21,21 @@ export default async function GateScanPage(props: {
     collection: 'events',
     user,
     overrideAccess: false,
-    sort: '-date',
+    sort: 'date',
     limit: 50,
     depth: 0,
   })
 
-  const initialEventId = sp.eventId ? Number(sp.eventId) : eventsRes.docs[0]?.id || null
+  const todayKey = getISTDateKey(new Date())
+  const nextUpcomingEvent =
+    eventsRes.docs.find((e) => {
+      const evKey = getISTDateKey(e.date)
+      return !evKey || evKey >= todayKey
+    }) ||
+    eventsRes.docs[eventsRes.docs.length - 1] ||
+    null
+
+  const initialEventId = sp.eventId ? Number(sp.eventId) : nextUpcomingEvent?.id || null
   const canScan = userHasRole(user, ['gate_staff', 'booking_officer', 'super_admin'])
 
   return (
@@ -37,6 +47,7 @@ export default async function GateScanPage(props: {
           name: e.name,
           date: e.date,
           venue: e.venue,
+          isScanOpen: isScanAllowedForEventDate(e.date),
         }))}
         initialEventId={initialEventId}
         canScan={canScan}

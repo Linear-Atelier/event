@@ -8,6 +8,7 @@ import {
   Clock,
   CreditCard,
   LayoutGrid,
+  Lock,
   QrCode,
   RefreshCw,
   Search,
@@ -16,6 +17,8 @@ import {
   Users,
   X,
 } from 'lucide-react'
+
+import { formatEventDayLabel } from '@/lib/event-date'
 
 export interface DashboardBookingRow {
   id: number
@@ -92,6 +95,7 @@ interface EventDashboardClientProps {
     date: string
     venue: string
     publicKey?: string | null
+    isScanOpen?: boolean
   }
   bookings: DashboardBookingRow[]
   tables: DashboardTableCard[]
@@ -243,13 +247,25 @@ export function EventDashboardClient({
             <CreditCard className="h-4 w-4" />
             Finance
           </Link>
-          <Link
-            href={`/scan?eventId=${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-2xl bg-neutral-950 px-4 py-2 text-xs font-bold text-white transition hover:bg-neutral-800"
-          >
-            <QrCode className="h-4 w-4" />
-            Gate Scan
-          </Link>
+          {event.isScanOpen === false ? (
+            <button
+              type="button"
+              disabled
+              title={`Gate scan opens on ${formatEventDayLabel(event.date)}`}
+              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-2xl bg-neutral-100 px-4 py-2 text-xs font-bold text-neutral-400"
+            >
+              <Lock className="h-4 w-4" />
+              Gate Scan
+            </button>
+          ) : (
+            <Link
+              href={`/scan?eventId=${event.id}`}
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-neutral-950 px-4 py-2 text-xs font-bold text-white transition hover:bg-neutral-800"
+            >
+              <QrCode className="h-4 w-4" />
+              Gate Scan
+            </Link>
+          )}
         </div>
       </div>
 

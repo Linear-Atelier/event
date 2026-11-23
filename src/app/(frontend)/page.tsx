@@ -11,6 +11,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { getServerUser } from '@/lib/auth'
+import { isScanAllowedForEventDate } from '@/lib/event-date'
 import { EventCard, type EventListItem } from '@/components/EventCard'
 
 export const dynamic = 'force-dynamic'
@@ -60,6 +61,7 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
       icon: nextEventDoc.icon || null,
       iconSvg: nextEventDoc.iconSvg || null,
       isPast: !Number.isNaN(evMs) && evMs < cutoffMs,
+      isScanOpen: isScanAllowedForEventDate(nextEventDoc.date),
       bookingCount: evBookings.length,
       totalPax: evBookings.reduce((sum, b) => sum + (b.totalPax || 0), 0),
       totalRevenue: evBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0),

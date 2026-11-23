@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import { getServerUser } from '@/lib/auth'
+import { isScanAllowedForEventDate } from '@/lib/event-date'
 import { EventsListClient } from '@/components/EventsListClient'
 
 export const dynamic = 'force-dynamic'
@@ -46,6 +47,7 @@ async function loadEventListItems(user: NonNullable<Awaited<ReturnType<typeof ge
         icon: ev.icon || null,
         iconSvg: ev.iconSvg || null,
         isPast: !Number.isNaN(evMs) && evMs < cutoffMs,
+        isScanOpen: isScanAllowedForEventDate(ev.date),
         bookingCount: bookings.totalDocs,
         totalPax: bookings.docs.reduce((s, b) => s + (b.totalPax || 0), 0),
         totalRevenue: bookings.docs.reduce((s, b) => s + (b.totalAmount || 0), 0),
