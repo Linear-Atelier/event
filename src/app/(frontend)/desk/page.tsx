@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import { getServerUser, userHasRole } from '@/lib/auth'
+import { expireStalePendingBookings } from '@/lib/razorpay'
 import { BookingDeskClient } from '@/components/BookingDeskClient'
 
 export const dynamic = 'force-dynamic'
@@ -15,6 +16,7 @@ export default async function BookingDeskPage(props: {
 
   const sp = await props.searchParams
   const payload = await getPayload({ config })
+  await expireStalePendingBookings(payload)
 
   const eventsRes = await payload.find({
     collection: 'events',
@@ -125,6 +127,9 @@ export default async function BookingDeskPage(props: {
             totalAmount: b.totalAmount,
             status: b.status,
             paymentMode: b.paymentMode,
+            paymentStatus: b.paymentStatus,
+            paymentLinkUrl: b.paymentLinkUrl || null,
+            paymentExpiresAt: b.paymentExpiresAt || null,
             tablesSummary: (tablesByBooking.get(b.id) || []).join(', ') || 'Unassigned',
             assignedTableLabels: tableLabelsByBooking.get(b.id) || [],
             tickets: (ticketsByBooking.get(b.id) || []).map((t) => {

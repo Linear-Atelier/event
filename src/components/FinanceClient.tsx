@@ -70,6 +70,7 @@ export function FinanceClient({
       bookings.filter(
         (b) =>
           b.status !== 'cancelled' &&
+          b.status !== 'pending_payment' &&
           (selectedEventId === 'all' || String(b.eventId) === selectedEventId),
       ),
     [bookings, selectedEventId],

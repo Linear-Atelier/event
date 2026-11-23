@@ -3,7 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  Clock,
+  Copy,
+  ExternalLink,
   Loader2,
   Minus,
   Plus,
@@ -73,6 +77,9 @@ interface RecentBookingItem {
   totalAmount: number
   status: string
   paymentMode: string
+  paymentStatus?: string
+  paymentLinkUrl?: string | null
+  paymentExpiresAt?: string | null
   tablesSummary: string
   assignedTableLabels?: string[]
   tickets: Array<{
@@ -144,8 +151,8 @@ export function BookingDeskClient({
   const [phoneTouched, setPhoneTouched] = useState(false)
   const [emailTouched, setEmailTouched] = useState(false)
   const [paymentMode, setPaymentMode] = useState<
-    'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR'
-  >('CASH')
+    'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR'
+  >('RAZORPAY')
   const [notes, setNotes] = useState('')
 
   // Ticket quantities: phaseId -> qty
@@ -176,11 +183,36 @@ export function BookingDeskClient({
       paxNames?: string[]
     }>
   } | null>(null)
+  const [resendingReceipt, setResendingReceipt] = useState(false)
+  const [resendFeedback, setResendFeedback] = useState<{
+    type: 'ok' | 'err'
+    text: string
+  } | null>(null)
+  const [pendingPayment, setPendingPayment] = useState<{
+    bookingId: number
+    bookingCode: string
+    holderName: string
+    phone: string
+    email?: string | null
+    totalPax: number
+    totalAmount: number
+    tablesSummary: string
+    paymentLinkUrl: string
+    paymentExpiresAt: string
+    tickets: Array<{
+      id: number
+      ticketCode: string
+      paxCount: number
+      paxNames?: string[]
+    }>
+  } | null>(null)
 
   // Manage bookings state
   const [recentBookings, setRecentBookings] = useState<RecentBookingItem[]>(initialRecent)
   const [manageSearch, setManageSearch] = useState('')
-  const [manageFilter, setManageFilter] = useState<'all' | 'unissued' | 'no_table'>('all')
+  const [manageFilter, setManageFilter] = useState<'all' | 'pending' | 'unissued' | 'no_table'>(
+    'all',
+  )
   const [editingTablesFor, setEditingTablesFor] = useState<RecentBookingItem | null>(null)
   const [editSelectedTables, setEditSelectedTables] = useState<string[]>([])
   const [editResend, setEditResend] = useState(true)
@@ -204,6 +236,7 @@ export function BookingDeskClient({
   }, [mode])
 
   const paymentModeLabel: Record<typeof paymentMode, string> = {
+    RAZORPAY: 'RAZORPAY',
     CASH: 'CASH',
     OFFICER_UPI: 'OFFICER UPI',
     PAY_AT_DOOR: 'PAY AT DOOR',
@@ -679,22 +712,56 @@ export function BookingDeskClient({
         paxNamesByTicket.set(tId, arr)
       }
 
-      setReceipt({
-        bookingId: data.booking.id,
-        bookingCode: data.booking.bookingCode,
-        holderName: data.booking.holderName,
-        totalPax: data.booking.totalPax,
-        totalAmount: data.booking.totalAmount,
-        tablesSummary: data.tablesSummary,
-        tickets: (data.tickets || []).map(
-          (t: { id: number; ticketCode: string; paxCount: number }) => ({
-            id: t.id,
-            ticketCode: t.ticketCode,
-            paxCount: t.paxCount,
-            paxNames: paxNamesByTicket.get(t.id) || [],
-          }),
-        ),
-      })
+      const mappedTickets = (data.tickets || []).map(
+        (t: {
+          id: number
+          ticketCode: string
+          ticketTypeName?: string
+          attendeeNames?: string | null
+          paxCount: number
+        }) => ({
+          id: t.id,
+          ticketCode: t.ticketCode,
+          ticketTypeName: t.ticketTypeName || 'Ticket',
+          paxCount: t.paxCount,
+          physicalIssued: false,
+          paxNames:
+            paxNamesByTicket.get(t.id) ||
+            (t.attendeeNames
+              ? t.attendeeNames
+                .split(',')
+                .map((n) => n.trim())
+                .filter(Boolean)
+              : []),
+        }),
+      )
+
+      if (data.booking.status === 'pending_payment' && data.paymentLinkUrl) {
+        setPendingPayment({
+          bookingId: data.booking.id,
+          bookingCode: data.booking.bookingCode,
+          holderName: data.booking.holderName,
+          phone: data.booking.phone,
+          email: data.booking.email,
+          totalPax: data.booking.totalPax,
+          totalAmount: data.booking.totalAmount,
+          tablesSummary: data.tablesSummary,
+          paymentLinkUrl: data.paymentLinkUrl,
+          paymentExpiresAt:
+            data.paymentExpiresAt || new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          tickets: mappedTickets,
+        })
+      } else {
+        setReceipt({
+          bookingId: data.booking.id,
+          bookingCode: data.booking.bookingCode,
+          holderName: data.booking.holderName,
+          totalPax: data.booking.totalPax,
+          totalAmount: data.booking.totalAmount,
+          tablesSummary: data.tablesSummary,
+          tickets: mappedTickets,
+        })
+      }
 
       setRecentBookings((prev) => [
         {
@@ -708,31 +775,12 @@ export function BookingDeskClient({
           totalAmount: data.booking.totalAmount,
           status: data.booking.status,
           paymentMode: data.booking.paymentMode,
+          paymentStatus: data.booking.paymentStatus,
+          paymentLinkUrl: data.paymentLinkUrl || null,
+          paymentExpiresAt: data.paymentExpiresAt || null,
           tablesSummary: data.tablesSummary,
           assignedTableLabels: [...selectedTables],
-          tickets: (data.tickets || []).map(
-            (t: {
-              id: number
-              ticketCode: string
-              ticketTypeName?: string
-              attendeeNames?: string | null
-              paxCount: number
-            }) => ({
-              id: t.id,
-              ticketCode: t.ticketCode,
-              ticketTypeName: t.ticketTypeName || 'Ticket',
-              paxCount: t.paxCount,
-              physicalIssued: false,
-              paxNames:
-                paxNamesByTicket.get(t.id) ||
-                (t.attendeeNames
-                  ? t.attendeeNames
-                    .split(',')
-                    .map((n) => n.trim())
-                    .filter(Boolean)
-                  : []),
-            }),
-          ),
+          tickets: mappedTickets,
         },
         ...prev,
       ])
@@ -879,8 +927,10 @@ export function BookingDeskClient({
   const filteredRecent = useMemo(() => {
     const q = manageSearch.trim().toLowerCase()
     return eventRecentBookings.filter((b) => {
-      if (manageFilter === 'unissued') {
-        if (b.status === 'cancelled' || !b.tickets.some((t) => !t.physicalIssued)) {
+      if (manageFilter === 'pending') {
+        if (b.status !== 'pending_payment') return false
+      } else if (manageFilter === 'unissued') {
+        if (b.status === 'cancelled' || b.status === 'pending_payment' || !b.tickets.some((t) => !t.physicalIssued)) {
           return false
         }
       } else if (manageFilter === 'no_table') {
@@ -958,7 +1008,7 @@ export function BookingDeskClient({
       )}
 
       {mode === 'new' ? (
-        <form onSubmit={handleCreateBooking} className="grid gap-6 pb-40 lg:grid-cols-5 lg:pb-0">
+        <form onSubmit={handleCreateBooking} className="grid gap-6 pb-20 lg:grid-cols-5 lg:pb-0">
           {/* Left columns: Tickets & Tables */}
           <div className="space-y-6 lg:col-span-3">
             {error && (
@@ -1077,233 +1127,233 @@ export function BookingDeskClient({
                                 </div>
                               </div>
 
-                        {/* Inline Member / Guest Inputs inside this selected Ticket */}
-                        {qty > 0 && (
-                          <div className="mt-3.5 space-y-3 border-t border-dashed border-neutral-200 pt-3">
-                            {Array.from({ length: qty }).map((_, tIdx) => (
-                              <div
-                                key={`${p.id}-inst-${tIdx}`}
-                                className="border-b border-neutral-200 pb-4 last:border-b-0 last:pb-0"
-                              >
-                                {qty > 1 && (
-                                  <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
-                                    {p.ticketTypeName} #{tIdx + 1}
-                                  </div>
-                                )}
-
-                                <div className="grid gap-2.5 sm:grid-cols-2">
-                                  {Array.from({ length: p.paxMultiplier }).map((__, pIdx) => {
-                                    const paxKey = `${p.id}-${tIdx}-${pIdx}`
-                                    const entry = getPaxEntry(paxKey)
-                                    const isFocused = activePaxKey === paxKey
-                                    const dupError = slotDuplicateErrors.get(paxKey)
-                                    const requiresMember = Boolean(p.memberOnly)
-                                    const label = requiresMember
-                                      ? p.paxMultiplier > 1
-                                        ? pIdx === 0
-                                          ? 'Member (Pax 1) *'
-                                          : `Member Spouse / Partner (Pax ${pIdx + 1}) *`
-                                        : 'Member *'
-                                      : p.paxMultiplier > 1
-                                        ? `Guest ${pIdx + 1} Name *`
-                                        : 'Guest Name *'
-
-                                    return (
-                                      <div key={paxKey} className="relative">
-                                        <div className="mb-1 flex items-center justify-between gap-2">
-                                          <label className="text-[11px] font-semibold text-neutral-700">
-                                            {label}
-                                          </label>
-                                          {!requiresMember && entry.memberId && (
-                                            <span
-                                              className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${entry.subsStatus === 'active'
-                                                ? 'bg-emerald-100 text-emerald-800'
-                                                : entry.subsStatus === 'arrears'
-                                                  ? 'bg-amber-100 text-amber-800'
-                                                  : 'bg-rose-100 text-rose-800'
-                                                }`}
-                                            >
-                                              {entry.memberCode} · {entry.subsStatus}
-                                            </span>
-                                          )}
+                              {/* Inline Member / Guest Inputs inside this selected Ticket */}
+                              {qty > 0 && (
+                                <div className="mt-3.5 space-y-3 border-t border-dashed border-neutral-200 pt-3">
+                                  {Array.from({ length: qty }).map((_, tIdx) => (
+                                    <div
+                                      key={`${p.id}-inst-${tIdx}`}
+                                      className="border-b border-neutral-200 pb-4 last:border-b-0 last:pb-0"
+                                    >
+                                      {qty > 1 && (
+                                        <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                                          {p.ticketTypeName} #{tIdx + 1}
                                         </div>
+                                      )}
 
-                                        {/* Locked Member Chip when a Member is selected on a Member-Only slot */}
-                                        {requiresMember && entry.memberId ? (
-                                          <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2">
-                                            <div className="min-w-0">
-                                              <div className="truncate text-xs font-bold text-neutral-900">
-                                                {entry.name}
+                                      <div className="grid gap-2.5 sm:grid-cols-2">
+                                        {Array.from({ length: p.paxMultiplier }).map((__, pIdx) => {
+                                          const paxKey = `${p.id}-${tIdx}-${pIdx}`
+                                          const entry = getPaxEntry(paxKey)
+                                          const isFocused = activePaxKey === paxKey
+                                          const dupError = slotDuplicateErrors.get(paxKey)
+                                          const requiresMember = Boolean(p.memberOnly)
+                                          const label = requiresMember
+                                            ? p.paxMultiplier > 1
+                                              ? pIdx === 0
+                                                ? 'Member (Pax 1) *'
+                                                : `Member Spouse / Partner (Pax ${pIdx + 1}) *`
+                                              : 'Member *'
+                                            : p.paxMultiplier > 1
+                                              ? `Guest ${pIdx + 1} Name *`
+                                              : 'Guest Name *'
+
+                                          return (
+                                            <div key={paxKey} className="relative">
+                                              <div className="mb-1 flex items-center justify-between gap-2">
+                                                <label className="text-[11px] font-semibold text-neutral-700">
+                                                  {label}
+                                                </label>
+                                                {!requiresMember && entry.memberId && (
+                                                  <span
+                                                    className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${entry.subsStatus === 'active'
+                                                      ? 'bg-emerald-100 text-emerald-800'
+                                                      : entry.subsStatus === 'arrears'
+                                                        ? 'bg-amber-100 text-amber-800'
+                                                        : 'bg-rose-100 text-rose-800'
+                                                      }`}
+                                                  >
+                                                    {entry.memberCode} · {entry.subsStatus}
+                                                  </span>
+                                                )}
                                               </div>
-                                              <div className="flex items-center gap-1.5 text-[10px] font-semibold">
-                                                <span className="text-neutral-500">
-                                                  {entry.memberCode}
-                                                </span>
-                                                <span
-                                                  className={`rounded-full px-1.5 py-0.2 uppercase ${entry.subsStatus === 'active'
-                                                    ? 'bg-emerald-100 text-emerald-800'
-                                                    : entry.subsStatus === 'arrears'
-                                                      ? 'bg-amber-100 text-amber-800'
-                                                      : 'bg-rose-100 text-rose-800'
-                                                    }`}
-                                                >
-                                                  {entry.subsStatus}
-                                                </span>
-                                              </div>
-                                            </div>
-                                            <button
-                                              type="button"
-                                              onClick={() => clearPaxMemberLink(paxKey, true)}
-                                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-neutral-500 shadow-xs hover:text-rose-600"
-                                              title="Change member"
-                                            >
-                                              <X className="h-3.5 w-3.5" />
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <>
-                                            <div className="relative">
-                                              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
-                                              <input
-                                                type="text"
-                                                required
-                                                value={entry.name}
-                                                onFocus={() => setActivePaxKey(paxKey)}
-                                                onBlur={() =>
-                                                  setTimeout(
-                                                    () =>
-                                                      setActivePaxKey((curr) =>
-                                                        curr === paxKey ? null : curr,
-                                                      ),
-                                                    180,
-                                                  )
-                                                }
-                                                onChange={(e) =>
-                                                  updatePaxName(paxKey, e.target.value)
-                                                }
-                                                placeholder={
-                                                  requiresMember
-                                                    ? 'Search & pick member (name, phone, ID)…'
-                                                    : 'Type guest name or search member…'
-                                                }
-                                                className={`w-full rounded-xl border bg-white py-2 pl-8 pr-8 text-xs focus:border-neutral-900 focus:outline-none ${dupError
-                                                  ? 'border-rose-400 bg-rose-50/40'
-                                                  : requiresMember && !entry.memberId
-                                                    ? 'border-amber-300 bg-amber-50/30'
-                                                    : !entry.name.trim()
-                                                      ? 'border-amber-300'
-                                                      : 'border-neutral-300'
-                                                  }`}
-                                              />
-                                              {entry.memberId && !requiresMember && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => clearPaxMemberLink(paxKey, false)}
-                                                  className="absolute right-2 top-2 text-neutral-400 hover:text-rose-600"
-                                                  title="Unlink member"
-                                                >
-                                                  <X className="h-3.5 w-3.5" />
-                                                </button>
-                                              )}
-                                              {isFocused && searchingPax && (
-                                                <span className="absolute right-2.5 top-2 text-[10px] text-neutral-400">
-                                                  …
-                                                </span>
-                                              )}
-                                            </div>
 
-                                            {dupError && (
-                                              <p className="mt-1 text-[10px] font-semibold text-rose-600">
-                                                {dupError}
-                                              </p>
-                                            )}
-
-                                            {!dupError &&
-                                              requiresMember &&
-                                              entry.name.trim().length > 0 &&
-                                              !entry.memberId && (
-                                                <p className="mt-1 text-[10px] font-semibold text-amber-700">
-                                                  Tap a member from the list below to select
-                                                </p>
-                                              )}
-
-                                            {isFocused &&
-                                              !entry.memberId &&
-                                              visiblePaxMemberResults.length > 0 && (
-                                                <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
-                                                  {visiblePaxMemberResults.map((m) => {
-                                                    const bookedCode = bookedByMemberId.get(m.id)
-                                                    const usedElsewhereInForm = expandedTicketGroups.some((g) =>
-                                                      g.paxKeys.some(
-                                                        (k) => k !== paxKey && getPaxEntry(k).memberId === m.id,
-                                                      ),
-                                                    )
-                                                    const subsBlocked = requiresMember && m.subsStatus !== 'active'
-                                                    const canSelect =
-                                                      !subsBlocked && !bookedCode && !usedElsewhereInForm
-                                                    const blockedReason = bookedCode
-                                                      ? `Booked on ${bookedCode}`
-                                                      : usedElsewhereInForm
-                                                        ? 'Already selected'
-                                                        : subsBlocked
-                                                          ? 'Active subs required'
-                                                          : null
-
-                                                    return (
-                                                      <button
-                                                        key={m.id}
-                                                        type="button"
-                                                        disabled={!canSelect}
-                                                        onMouseDown={(e) => {
-                                                          e.preventDefault()
-                                                          if (canSelect) selectPaxMember(paxKey, m, requiresMember)
-                                                        }}
-                                                        className={`flex w-full items-center justify-between border-b border-neutral-100 px-3 py-2 text-left text-xs ${canSelect
-                                                          ? 'hover:bg-neutral-100'
-                                                          : 'cursor-not-allowed bg-neutral-50/70 opacity-60'
+                                              {/* Locked Member Chip when a Member is selected on a Member-Only slot */}
+                                              {requiresMember && entry.memberId ? (
+                                                <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2">
+                                                  <div className="min-w-0">
+                                                    <div className="truncate text-xs font-bold text-neutral-900">
+                                                      {entry.name}
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 text-[10px] font-semibold">
+                                                      <span className="text-neutral-500">
+                                                        {entry.memberCode}
+                                                      </span>
+                                                      <span
+                                                        className={`rounded-full px-1.5 py-0.2 uppercase ${entry.subsStatus === 'active'
+                                                          ? 'bg-emerald-100 text-emerald-800'
+                                                          : entry.subsStatus === 'arrears'
+                                                            ? 'bg-amber-100 text-amber-800'
+                                                            : 'bg-rose-100 text-rose-800'
                                                           }`}
                                                       >
-                                                        <div>
-                                                          <div className="font-semibold text-neutral-900">
-                                                            {m.fullName} ({m.memberCode})
-                                                          </div>
-                                                          <div className="text-[10px] text-neutral-500">
-                                                            {m.phone}
-                                                            {blockedReason && (
-                                                              <span className="ml-1.5 font-semibold text-rose-600">
-                                                                · {blockedReason}
-                                                              </span>
-                                                            )}
-                                                          </div>
-                                                        </div>
-                                                        <span
-                                                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
-                                                            ? 'bg-emerald-100 text-emerald-800'
-                                                            : m.subsStatus === 'arrears'
-                                                              ? 'bg-amber-100 text-amber-800'
-                                                              : 'bg-rose-100 text-rose-800'
-                                                            }`}
-                                                        >
-                                                          {m.subsStatus}
-                                                        </span>
-                                                      </button>
-                                                    )
-                                                  })}
+                                                        {entry.subsStatus}
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => clearPaxMemberLink(paxKey, true)}
+                                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-neutral-500 shadow-xs hover:text-rose-600"
+                                                    title="Change member"
+                                                  >
+                                                    <X className="h-3.5 w-3.5" />
+                                                  </button>
                                                 </div>
+                                              ) : (
+                                                <>
+                                                  <div className="relative">
+                                                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
+                                                    <input
+                                                      type="text"
+                                                      required
+                                                      value={entry.name}
+                                                      onFocus={() => setActivePaxKey(paxKey)}
+                                                      onBlur={() =>
+                                                        setTimeout(
+                                                          () =>
+                                                            setActivePaxKey((curr) =>
+                                                              curr === paxKey ? null : curr,
+                                                            ),
+                                                          180,
+                                                        )
+                                                      }
+                                                      onChange={(e) =>
+                                                        updatePaxName(paxKey, e.target.value)
+                                                      }
+                                                      placeholder={
+                                                        requiresMember
+                                                          ? 'Search & pick member (name, phone, ID)…'
+                                                          : 'Type guest name or search member…'
+                                                      }
+                                                      className={`w-full rounded-xl border bg-white py-2 pl-8 pr-8 text-xs focus:border-neutral-900 focus:outline-none ${dupError
+                                                        ? 'border-rose-400 bg-rose-50/40'
+                                                        : requiresMember && !entry.memberId
+                                                          ? 'border-amber-300 bg-amber-50/30'
+                                                          : !entry.name.trim()
+                                                            ? 'border-amber-300'
+                                                            : 'border-neutral-300'
+                                                        }`}
+                                                    />
+                                                    {entry.memberId && !requiresMember && (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => clearPaxMemberLink(paxKey, false)}
+                                                        className="absolute right-2 top-2 text-neutral-400 hover:text-rose-600"
+                                                        title="Unlink member"
+                                                      >
+                                                        <X className="h-3.5 w-3.5" />
+                                                      </button>
+                                                    )}
+                                                    {isFocused && searchingPax && (
+                                                      <span className="absolute right-2.5 top-2 text-[10px] text-neutral-400">
+                                                        …
+                                                      </span>
+                                                    )}
+                                                  </div>
+
+                                                  {dupError && (
+                                                    <p className="mt-1 text-[10px] font-semibold text-rose-600">
+                                                      {dupError}
+                                                    </p>
+                                                  )}
+
+                                                  {!dupError &&
+                                                    requiresMember &&
+                                                    entry.name.trim().length > 0 &&
+                                                    !entry.memberId && (
+                                                      <p className="mt-1 text-[10px] font-semibold text-amber-700">
+                                                        Tap a member from the list below to select
+                                                      </p>
+                                                    )}
+
+                                                  {isFocused &&
+                                                    !entry.memberId &&
+                                                    visiblePaxMemberResults.length > 0 && (
+                                                      <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
+                                                        {visiblePaxMemberResults.map((m) => {
+                                                          const bookedCode = bookedByMemberId.get(m.id)
+                                                          const usedElsewhereInForm = expandedTicketGroups.some((g) =>
+                                                            g.paxKeys.some(
+                                                              (k) => k !== paxKey && getPaxEntry(k).memberId === m.id,
+                                                            ),
+                                                          )
+                                                          const subsBlocked = requiresMember && m.subsStatus !== 'active'
+                                                          const canSelect =
+                                                            !subsBlocked && !bookedCode && !usedElsewhereInForm
+                                                          const blockedReason = bookedCode
+                                                            ? `Booked on ${bookedCode}`
+                                                            : usedElsewhereInForm
+                                                              ? 'Already selected'
+                                                              : subsBlocked
+                                                                ? 'Active subs required'
+                                                                : null
+
+                                                          return (
+                                                            <button
+                                                              key={m.id}
+                                                              type="button"
+                                                              disabled={!canSelect}
+                                                              onMouseDown={(e) => {
+                                                                e.preventDefault()
+                                                                if (canSelect) selectPaxMember(paxKey, m, requiresMember)
+                                                              }}
+                                                              className={`flex w-full items-center justify-between border-b border-neutral-100 px-3 py-2 text-left text-xs ${canSelect
+                                                                ? 'hover:bg-neutral-100'
+                                                                : 'cursor-not-allowed bg-neutral-50/70 opacity-60'
+                                                                }`}
+                                                            >
+                                                              <div>
+                                                                <div className="font-semibold text-neutral-900">
+                                                                  {m.fullName} ({m.memberCode})
+                                                                </div>
+                                                                <div className="text-[10px] text-neutral-500">
+                                                                  {m.phone}
+                                                                  {blockedReason && (
+                                                                    <span className="ml-1.5 font-semibold text-rose-600">
+                                                                      · {blockedReason}
+                                                                    </span>
+                                                                  )}
+                                                                </div>
+                                                              </div>
+                                                              <span
+                                                                className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
+                                                                  ? 'bg-emerald-100 text-emerald-800'
+                                                                  : m.subsStatus === 'arrears'
+                                                                    ? 'bg-amber-100 text-amber-800'
+                                                                    : 'bg-rose-100 text-rose-800'
+                                                                  }`}
+                                                              >
+                                                                {m.subsStatus}
+                                                              </span>
+                                                            </button>
+                                                          )
+                                                        })}
+                                                      </div>
+                                                    )}
+                                                </>
                                               )}
-                                          </>
-                                        )}
+                                            </div>
+                                          )
+                                        })}
                                       </div>
-                                    )
-                                  })}
+                                    </div>
+                                  ))}
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                              </div>
-                            )
-                          })}
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
                   ))}
@@ -1397,18 +1447,18 @@ export function BookingDeskClient({
           </div>
 
           {/* Right Column: 3. Booking Contact, Summary & Payment */}
-          <div className="space-y-4 pb-20 lg:col-span-2 lg:pb-0">
-            <div ref={summaryCardRef} className="sticky top-20 rounded-3xl bg-neutral-50/90 p-5">
+          <div className="space-y-4 lg:col-span-2 lg:pb-0">
+            <div ref={summaryCardRef} className="sticky top-20 rounded-3xl bg-neutral-950 p-5 text-white shadow-xl">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-neutral-900">
-                  <UserCheck className="h-4 w-4 text-neutral-700" />
+                <h2 className="flex items-center gap-2 text-sm font-bold text-white">
+                  <UserCheck className="h-4 w-4 text-neutral-300" />
                   3. Booking Contact &amp; Payment
                 </h2>
                 {selectedMember && (
                   <button
                     type="button"
                     onClick={clearMember}
-                    className="text-[11px] font-semibold text-neutral-500 hover:text-rose-600"
+                    className="text-[11px] font-semibold text-neutral-400 transition hover:text-rose-400"
                   >
                     Unlink {selectedMember.memberCode}
                   </button>
@@ -1416,9 +1466,9 @@ export function BookingDeskClient({
               </div>
 
               {/* Prefilled Booking Holder Contact */}
-              <div className="mt-4 space-y-3 border-b border-dashed border-neutral-200 pb-4">
+              <div className="mt-4 space-y-3 border-b border-dashed border-white/15 pb-4">
                 <div className="relative">
-                  <label className="mb-1 block text-xs font-semibold text-neutral-700">
+                  <label className="mb-1 block text-xs font-semibold text-neutral-300">
                     Booking Name *
                   </label>
                   <div className="relative">
@@ -1436,7 +1486,7 @@ export function BookingDeskClient({
                         setHolderFocused(true)
                       }}
                       placeholder="Auto-fills from first ticket..."
-                      className="w-full rounded-xl border border-neutral-300 bg-white py-2 pl-8 pr-3 text-sm focus:border-neutral-900 focus:outline-none"
+                      className="w-full rounded-xl border border-white/15 bg-white py-2 pl-8 pr-3 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
                     />
                     {holderFocused && searchingMembers && (
                       <span className="absolute right-2.5 top-2.5 text-xs text-neutral-400">
@@ -1483,7 +1533,7 @@ export function BookingDeskClient({
 
                 <div className="grid gap-2.5 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-neutral-700">
+                    <label className="mb-1 block text-xs font-semibold text-neutral-300">
                       WhatsApp / Phone *
                     </label>
                     <input
@@ -1495,11 +1545,11 @@ export function BookingDeskClient({
                         setPhoneTouched(true)
                       }}
                       placeholder="9847012345"
-                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none"
+                      className="w-full rounded-xl border border-white/15 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-neutral-700">
+                    <label className="mb-1 block text-xs font-semibold text-neutral-300">
                       Email
                     </label>
                     <input
@@ -1510,26 +1560,26 @@ export function BookingDeskClient({
                         setEmailTouched(true)
                       }}
                       placeholder="member@example.com"
-                      className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none"
+                      className="w-full rounded-xl border border-white/15 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="mt-4 space-y-2 border-b border-neutral-200/70 pb-4 text-xs">
+              <div className="mt-4 space-y-2 border-b border-white/15 pb-4 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Total Guests (Pax)</span>
-                  <span className="font-bold text-neutral-900">{totalPax}</span>
+                  <span className="text-neutral-400">Total Guests (Pax)</span>
+                  <span className="font-bold text-white tabular-nums">{totalPax}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">Tables Assigned</span>
-                  <span className="font-semibold text-neutral-900">
+                  <span className="text-neutral-400">Tables Assigned</span>
+                  <span className="font-semibold text-white tabular-nums">
                     {tableEval.totalAllocatedSeats} seats
                   </span>
                 </div>
                 <div className="flex justify-between pt-2 text-base">
-                  <span className="font-bold text-neutral-900">Total Amount</span>
-                  <span className="font-bold text-emerald-700">
+                  <span className="font-bold text-white">Total Amount</span>
+                  <span className="font-extrabold text-emerald-400 tabular-nums">
                     ₹{totalAmount.toLocaleString('en-IN')}
                   </span>
                 </div>
@@ -1537,7 +1587,7 @@ export function BookingDeskClient({
 
               <div className="mt-4 space-y-3">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-neutral-700">
+                  <label className="mb-1 block text-xs font-semibold text-neutral-300">
                     Payment Mode
                   </label>
                   <select
@@ -1545,14 +1595,16 @@ export function BookingDeskClient({
                     onChange={(e) =>
                       setPaymentMode(
                         e.target.value as
+                        | 'RAZORPAY'
                         | 'CASH'
                         | 'OFFICER_UPI'
                         | 'COMPLIMENTARY'
                         | 'PAY_AT_DOOR',
                       )
                     }
-                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800"
+                    className="w-full rounded-xl border border-white/15 bg-white px-3 py-2.5 text-sm font-semibold text-neutral-900 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
                   >
+                    <option value="RAZORPAY">Razorpay (QR / Email Link)</option>
                     <option value="CASH">Cash (Collected by Me)</option>
                     <option value="OFFICER_UPI">Officer UPI</option>
                     <option value="PAY_AT_DOOR">Pay at Door</option>
@@ -1561,7 +1613,7 @@ export function BookingDeskClient({
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-neutral-700">
+                  <label className="mb-1 block text-xs font-semibold text-neutral-300">
                     Notes (Optional)
                   </label>
                   <textarea
@@ -1569,19 +1621,19 @@ export function BookingDeskClient({
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="e.g. Vegetarian preference, wheelchair access..."
-                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs focus:border-neutral-900 focus:outline-none"
+                    className="w-full rounded-xl border border-white/15 bg-white px-3 py-2 text-xs text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
                   />
                 </div>
 
                 {totalPax > 0 && duplicatePaxCount > 0 && (
-                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700">
+                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/15 px-3 py-2 text-[11px] font-semibold text-rose-200">
                     {duplicatePaxCount} duplicate or already-booked attendee
                     {duplicatePaxCount === 1 ? '' : 's'} — each ticket must have a unique guest.
                   </div>
                 )}
 
                 {totalPax > 0 && missingPaxCount > 0 && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800">
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/15 px-3 py-2 text-[11px] font-medium text-amber-200">
                     {missingMemberCount > 0
                       ? `Select a registered member for ${missingMemberCount} Member-Only ticket${missingMemberCount === 1 ? '' : 's'}.`
                       : `${missingPaxCount} guest name${missingPaxCount === 1 ? '' : 's'} required before confirming.`}
@@ -1597,11 +1649,15 @@ export function BookingDeskClient({
                     missingPaxCount > 0 ||
                     duplicatePaxCount > 0
                   }
-                  className="w-full rounded-lg bg-neutral-900 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-neutral-800 disabled:opacity-50"
+                  className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-extrabold text-neutral-950 shadow-sm transition hover:bg-neutral-200 active:scale-[0.99] disabled:opacity-45"
                 >
                   {submitting
-                    ? 'Creating Master QR Booking…'
-                    : `Confirm Booking · ₹${totalAmount.toLocaleString('en-IN')}`}
+                    ? paymentMode === 'RAZORPAY' && totalAmount > 0
+                      ? 'Generating Razorpay Link…'
+                      : 'Creating Master QR Booking…'
+                    : paymentMode === 'RAZORPAY' && totalAmount > 0
+                      ? `Generate Payment QR · ₹${totalAmount.toLocaleString('en-IN')}`
+                      : `Confirm Booking · ₹${totalAmount.toLocaleString('en-IN')}`}
                 </button>
               </div>
             </div>
@@ -1629,6 +1685,7 @@ export function BookingDeskClient({
                     onChange={(e) =>
                       setPaymentMode(
                         e.target.value as
+                        | 'RAZORPAY'
                         | 'CASH'
                         | 'OFFICER_UPI'
                         | 'COMPLIMENTARY'
@@ -1637,6 +1694,7 @@ export function BookingDeskClient({
                     }
                     className="absolute inset-0 h-full w-full cursor-pointer opacity-0 bg-neutral-800 "
                   >
+                    <option value="RAZORPAY">Razorpay (QR / Email Link)</option>
                     <option value="CASH">Cash (Collected by Me)</option>
                     <option value="OFFICER_UPI">Officer UPI</option>
                     <option value="PAY_AT_DOOR">Pay at Door</option>
@@ -1665,7 +1723,13 @@ export function BookingDeskClient({
                     </div>
                   </div>
                   <div className="flex items-center gap-1 text-sm font-extrabold">
-                    <span>{submitting ? 'Booking…' : 'Confirm'}</span>
+                    <span>
+                      {submitting
+                        ? 'Creating…'
+                        : paymentMode === 'RAZORPAY' && totalAmount > 0
+                          ? 'Pay QR'
+                          : 'Confirm'}
+                    </span>
                     <span className="text-xs leading-none">▸</span>
                   </div>
                 </button>
@@ -1703,8 +1767,12 @@ export function BookingDeskClient({
                 [
                   { key: 'all', label: `All (${eventRecentBookings.length})` },
                   {
+                    key: 'pending',
+                    label: `Pending (${eventRecentBookings.filter((b) => b.status === 'pending_payment').length})`,
+                  },
+                  {
                     key: 'unissued',
-                    label: `Unissued (${eventRecentBookings.filter((b) => b.status !== 'cancelled' && b.tickets.some((t) => !t.physicalIssued)).length})`,
+                    label: `Unissued (${eventRecentBookings.filter((b) => b.status !== 'cancelled' && b.status !== 'pending_payment' && b.tickets.some((t) => !t.physicalIssued)).length})`,
                   },
                   {
                     key: 'no_table',
@@ -1758,12 +1826,14 @@ export function BookingDeskClient({
                             <span
                               className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${b.status === 'confirmed'
                                 ? 'bg-emerald-100 text-emerald-800'
-                                : b.status === 'transferred'
+                                : b.status === 'pending_payment'
                                   ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-rose-100 text-rose-800'
+                                  : b.status === 'transferred'
+                                    ? 'bg-sky-100 text-sky-800'
+                                    : 'bg-rose-100 text-rose-800'
                                 }`}
                             >
-                              {b.status}
+                              {b.status === 'pending_payment' ? 'PENDING PAYMENT' : b.status}
                             </span>
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-500 tabular-nums">
@@ -1870,32 +1940,68 @@ export function BookingDeskClient({
                     {/* Compact Action Footer */}
                     {b.status !== 'cancelled' && (
                       <div className="flex items-center justify-between gap-2 border-t border-zinc-100 bg-white px-3 py-2">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setReceipt({
-                                bookingId: b.id,
-                                bookingCode: b.bookingCode,
-                                holderName: b.holderName,
-                                totalPax: b.totalPax,
-                                totalAmount: b.totalAmount,
-                                tablesSummary: b.tablesSummary,
-                                tickets: b.tickets.map((t) => ({
-                                  id: t.id,
-                                  ticketCode: t.ticketCode,
-                                  paxCount: t.paxCount,
-                                  paxNames: t.paxNames,
-                                })),
-                              })
-                            }
-                            className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800"
-                          >
-                            <QrCode className="h-3.5 w-3.5" />
-                            QR Pass
-                          </button>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {b.status === 'pending_payment' ? (
+                            <>
+                              {b.paymentLinkUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPendingPayment({
+                                      bookingId: b.id,
+                                      bookingCode: b.bookingCode,
+                                      holderName: b.holderName,
+                                      phone: b.phone,
+                                      email: b.email,
+                                      totalPax: b.totalPax,
+                                      totalAmount: b.totalAmount,
+                                      tablesSummary: b.tablesSummary,
+                                      paymentLinkUrl: b.paymentLinkUrl!,
+                                      paymentExpiresAt:
+                                        b.paymentExpiresAt ||
+                                        new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+                                      tickets: b.tickets.map((t) => ({
+                                        id: t.id,
+                                        ticketCode: t.ticketCode,
+                                        paxCount: t.paxCount,
+                                        paxNames: t.paxNames,
+                                      })),
+                                    })
+                                  }
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-700"
+                                >
+                                  <QrCode className="h-3.5 w-3.5" />
+                                  Pay QR / Link
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setReceipt({
+                                  bookingId: b.id,
+                                  bookingCode: b.bookingCode,
+                                  holderName: b.holderName,
+                                  totalPax: b.totalPax,
+                                  totalAmount: b.totalAmount,
+                                  tablesSummary: b.tablesSummary,
+                                  tickets: b.tickets.map((t) => ({
+                                    id: t.id,
+                                    ticketCode: t.ticketCode,
+                                    paxCount: t.paxCount,
+                                    paxNames: t.paxNames,
+                                  })),
+                                })
+                              }
+                              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800"
+                            >
+                              <QrCode className="h-3.5 w-3.5" />
+                              QR Pass
+                            </button>
+                          )}
 
-                          {canCreate && (
+                          {canCreate && b.status !== 'pending_payment' && (
                             <button
                               type="button"
                               onClick={() => {
@@ -1929,6 +2035,54 @@ export function BookingDeskClient({
         </div>
       )}
 
+      {/* PENDING RAZORPAY PAYMENT MODAL (10-Min Hold + Live Polling + 1-Tap Cash/UPI Switch) */}
+      {pendingPayment && (
+        <PendingRazorpayModal
+          key={pendingPayment.bookingId}
+          pending={pendingPayment}
+          eventName={
+            events.find((e) => e.id === selectedEventId)?.name || pendingPayment.holderName
+          }
+          canSwitchManual={canCreate}
+          onClose={() => setPendingPayment(null)}
+          onConfirmed={(newPaymentMode) => {
+            const p = pendingPayment
+            setRecentBookings((prev) =>
+              prev.map((b) =>
+                b.id === p.bookingId
+                  ? {
+                    ...b,
+                    status: 'confirmed',
+                    paymentStatus: 'paid',
+                    paymentMode: newPaymentMode || b.paymentMode,
+                  }
+                  : b,
+              ),
+            )
+            setPendingPayment(null)
+            setReceipt({
+              bookingId: p.bookingId,
+              bookingCode: p.bookingCode,
+              holderName: p.holderName,
+              totalPax: p.totalPax,
+              totalAmount: p.totalAmount,
+              tablesSummary: p.tablesSummary,
+              tickets: p.tickets,
+            })
+            loadEventMeta(selectedEventId)
+          }}
+          onExpired={() => {
+            const p = pendingPayment
+            setRecentBookings((prev) =>
+              prev.map((b) =>
+                b.id === p.bookingId ? { ...b, status: 'cancelled' } : b,
+              ),
+            )
+            loadEventMeta(selectedEventId)
+          }}
+        />
+      )}
+
       {/* POST-BOOKING RECEIPT & MASTER QR MODAL (Dark Frosted Glass Ticket Pass) */}
       {receipt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/75 p-4 backdrop-blur-sm">
@@ -1942,7 +2096,10 @@ export function BookingDeskClient({
               </div>
               <button
                 type="button"
-                onClick={() => setReceipt(null)}
+                onClick={() => {
+                  setReceipt(null)
+                  setResendFeedback(null)
+                }}
                 className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
               >
                 <X className="h-4 w-4" />
@@ -1991,24 +2148,73 @@ export function BookingDeskClient({
               </div>
             </div>
 
+            {resendFeedback && (
+              <div
+                className={`mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-semibold ${
+                  resendFeedback.type === 'ok'
+                    ? 'border border-emerald-400/25 bg-emerald-500/15 text-emerald-200'
+                    : 'border border-rose-400/25 bg-rose-500/15 text-rose-200'
+                }`}
+              >
+                {resendFeedback.text}
+              </div>
+            )}
+
             <div className="mt-4 flex gap-2">
               <button
                 type="button"
+                disabled={resendingReceipt}
                 onClick={async () => {
-                  await fetch(`/api/bookings/${receipt.bookingId}/resend`, {
-                    method: 'POST',
-                    credentials: 'include',
-                  })
-                  window.alert('WhatsApp & Email pass resend triggered!')
+                  setResendingReceipt(true)
+                  setResendFeedback(null)
+                  try {
+                    const res = await fetch(`/api/bookings/${receipt.bookingId}/resend`, {
+                      method: 'POST',
+                      credentials: 'include',
+                    })
+                    const data = await res.json().catch(() => ({}))
+                    if (res.ok) {
+                      const wa = data.result?.whatsapp || 'logged'
+                      const em = data.result?.email || 'logged'
+                      setResendFeedback({
+                        type: 'ok',
+                        text: `Pass resent · WhatsApp: ${wa}, Email: ${em}`,
+                      })
+                    } else {
+                      setResendFeedback({
+                        type: 'err',
+                        text: data.error || 'Failed to resend pass',
+                      })
+                    }
+                  } catch {
+                    setResendFeedback({
+                      type: 'err',
+                      text: 'Network error while resending pass',
+                    })
+                  } finally {
+                    setResendingReceipt(false)
+                  }
                 }}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-white/10 px-3 py-2.5 text-xs font-semibold text-white backdrop-blur-md hover:bg-white/20"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-white/10 px-3 py-2.5 text-xs font-semibold text-white backdrop-blur-md transition hover:bg-white/20 disabled:opacity-60"
               >
-                <Send className="h-3.5 w-3.5" />
-                Resend
+                {resendingReceipt ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Sending…
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    Resend
+                  </>
+                )}
               </button>
               <button
                 type="button"
-                onClick={() => setReceipt(null)}
+                onClick={() => {
+                  setReceipt(null)
+                  setResendFeedback(null)
+                }}
                 className="flex-1 rounded-2xl bg-white px-3 py-2.5 text-xs font-bold text-neutral-950 hover:bg-neutral-100"
               >
                 Done
@@ -2158,6 +2364,321 @@ function QrPassImage({ bookingCode }: { bookingCode: string }) {
         onError={() => setStatus('error')}
         className={`h-56 w-56 transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
       />
+    </div>
+  )
+}
+
+function QrLinkImage({ paymentLinkUrl }: { paymentLinkUrl: string }) {
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
+  const [retryCount, setRetryCount] = useState(0)
+
+  const src = `/api/qr/link?url=${encodeURIComponent(paymentLinkUrl)}${retryCount > 0 ? `&r=${retryCount}` : ''}`
+
+  return (
+    <div className="relative flex h-52 w-52 items-center justify-center overflow-hidden rounded-2xl">
+      {status === 'loading' && (
+        <div
+          role="status"
+          aria-label="Loading Razorpay QR"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5"
+        >
+          <div className="pointer-events-none absolute inset-4 animate-pulse">
+            <div className="absolute left-0 top-0 h-7 w-7 rounded-lg border-[3px] border-white/15" />
+            <div className="absolute right-0 top-0 h-7 w-7 rounded-lg border-[3px] border-white/15" />
+            <div className="absolute bottom-0 left-0 h-7 w-7 rounded-lg border-[3px] border-white/15" />
+          </div>
+          <Loader2 className="h-6 w-6 animate-spin text-amber-300" />
+          <span className="text-[11px] font-medium tracking-wide text-neutral-300">
+            Generating Payment QR…
+          </span>
+        </div>
+      )}
+
+      {status === 'error' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-center">
+          <AlertTriangle className="h-5 w-5 text-rose-300" />
+          <span className="text-xs font-semibold text-rose-200">QR failed to load</span>
+          <button
+            type="button"
+            onClick={() => {
+              setStatus('loading')
+              setRetryCount((c) => c + 1)
+            }}
+            className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white hover:bg-white/25"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        key={retryCount}
+        src={src}
+        alt="Razorpay Payment QR"
+        onLoad={() => setStatus('loaded')}
+        onError={() => setStatus('error')}
+        className={`h-52 w-52 transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+      />
+    </div>
+  )
+}
+
+function PendingRazorpayModal({
+  pending,
+  eventName,
+  canSwitchManual,
+  onClose,
+  onConfirmed,
+  onExpired,
+}: {
+  pending: {
+    bookingId: number
+    bookingCode: string
+    holderName: string
+    phone: string
+    email?: string | null
+    totalPax: number
+    totalAmount: number
+    tablesSummary: string
+    paymentLinkUrl: string
+    paymentExpiresAt: string
+    tickets: Array<{
+      id: number
+      ticketCode: string
+      paxCount: number
+      paxNames?: string[]
+    }>
+  }
+  eventName: string
+  canSwitchManual: boolean
+  onClose: () => void
+  onConfirmed: (newPaymentMode?: string) => void
+  onExpired: () => void
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  const [expired, setExpired] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [switchingMode, setSwitchingMode] = useState<'CASH' | 'OFFICER_UPI' | null>(null)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+
+  const expiresMs = new Date(pending.paymentExpiresAt).getTime()
+  const remainingSec = Math.max(0, Math.ceil((expiresMs - nowMs) / 1000))
+  const mins = Math.floor(remainingSec / 60)
+  const secs = remainingSec % 60
+  const countdownText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+
+  // 1-second countdown ticker
+  useEffect(() => {
+    if (expired) return
+    const timer = setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [expired])
+
+  // 3-second live Razorpay payment status poller
+  useEffect(() => {
+    if (expired) return
+    let cancelled = false
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/bookings/${pending.bookingId}/payment-status`, {
+          credentials: 'include',
+        })
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as {
+          status?: string
+          paymentStatus?: string
+          expired?: boolean
+        }
+        if (cancelled) return
+
+        if (data.status === 'confirmed' && data.paymentStatus === 'paid') {
+          onConfirmed('RAZORPAY')
+        } else if (data.status === 'cancelled' || data.expired) {
+          setExpired(true)
+          onExpired()
+        }
+      } catch {
+        // Ignore transient network errors while polling
+      }
+    }
+
+    const timer = setInterval(() => {
+      void poll()
+    }, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [pending.bookingId, expired, onConfirmed, onExpired])
+
+  async function handleCopyLink() {
+    try {
+      await navigator.clipboard.writeText(pending.paymentLinkUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      window.prompt('Copy payment link:', pending.paymentLinkUrl)
+    }
+  }
+
+  async function handleSwitchManual(mode: 'CASH' | 'OFFICER_UPI') {
+    setSwitchError(null)
+    setSwitchingMode(mode)
+    try {
+      const res = await fetch(`/api/bookings/${pending.bookingId}/switch-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ paymentMode: mode }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSwitchError(data.error || 'Could not switch payment mode')
+        return
+      }
+      onConfirmed(mode)
+    } catch {
+      setSwitchError('Network error while switching payment mode')
+    } finally {
+      setSwitchingMode(null)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/75 p-4 backdrop-blur-sm">
+      <div className="glass-surface w-full max-w-sm overflow-hidden rounded-3xl p-6 text-white shadow-2xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-amber-300">
+            <Clock className="h-4 w-4" />
+            <span className="text-xs font-bold uppercase tracking-wider">
+              {expired ? 'Hold Expired' : 'Awaiting Razorpay'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {!expired && (
+              <span
+                className={`rounded-full px-2.5 py-0.5 font-mono text-xs font-bold tabular-nums ${remainingSec <= 120
+                  ? 'bg-rose-500/25 text-rose-200'
+                  : 'bg-amber-400/20 text-amber-200'
+                  }`}
+              >
+                {countdownText}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close payment modal"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 text-center">
+          <div className="text-lg font-extrabold tracking-tight text-white">{eventName}</div>
+          <div className="mt-0.5 text-xs font-semibold text-neutral-200 tabular-nums">
+            {pending.bookingCode} · {pending.holderName} · ₹
+            {pending.totalAmount.toLocaleString('en-IN')}
+          </div>
+          <div className="mt-1 text-[11px] text-neutral-300/80">
+            {expired
+              ? '10-minute reservation expired. Held tables & attendee slots have been released.'
+              : pending.email
+                ? `Scan QR below or pay via the link sent to ${pending.email} / SMS.`
+                : 'Scan QR below or pay via the SMS link sent to the booking holder.'}
+          </div>
+
+          {!expired && (
+            <>
+              <div className="my-4 flex justify-center">
+                <QrLinkImage paymentLinkUrl={pending.paymentLinkUrl} />
+              </div>
+
+              <div className="flex items-center justify-center gap-2 text-[11px] text-emerald-300/90">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>Listening for payment confirmation…</span>
+              </div>
+
+              {/* Copy Link + Open Link (No WhatsApp — WhatsApp is strictly for Ticket Pass) */}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-emerald-300" />
+                      Copied Link
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy Payment Link
+                    </>
+                  )}
+                </button>
+                <a
+                  href={pending.paymentLinkUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Open Razorpay payment link"
+                  className="flex items-center justify-center rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              </div>
+            </>
+          )}
+
+          {switchError && (
+            <div className="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/15 px-3 py-2 text-[11px] font-medium text-rose-200">
+              {switchError}
+            </div>
+          )}
+
+          {/* 1-Tap Switch to Cash / Officer UPI fallback */}
+          {!expired && canSwitchManual && (
+            <div className="mt-4 border-t border-white/10 pt-3">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                Customer paying in person instead?
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={switchingMode !== null}
+                  onClick={() => handleSwitchManual('CASH')}
+                  className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-neutral-200 disabled:opacity-50"
+                >
+                  {switchingMode === 'CASH' ? 'Switching…' : 'Switch to Cash'}
+                </button>
+                <button
+                  type="button"
+                  disabled={switchingMode !== null}
+                  onClick={() => handleSwitchManual('OFFICER_UPI')}
+                  className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20 disabled:opacity-50"
+                >
+                  {switchingMode === 'OFFICER_UPI' ? 'Switching…' : 'Switch to UPI'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-3 w-full rounded-2xl border border-white/15 bg-transparent px-3 py-2 text-xs font-semibold text-neutral-300 transition hover:bg-white/10 hover:text-white"
+          >
+            {expired ? 'Close' : 'Close & Serve Next (Confirms in Background)'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

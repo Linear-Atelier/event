@@ -37,6 +37,7 @@ export const NotificationLogs: CollectionConfig = {
       required: true,
       options: [
         { label: 'Booking Created', value: 'booking_created' },
+        { label: 'Payment Link Sent', value: 'payment_link_sent' },
         { label: 'Table Updated', value: 'table_updated' },
         { label: 'Manual Resend', value: 'manual_resend' },
         { label: 'Cancelled', value: 'cancelled' },

@@ -112,6 +112,7 @@ export const Bookings: CollectionConfig = {
       defaultValue: 'confirmed',
       options: [
         { label: 'Confirmed', value: 'confirmed' },
+        { label: 'Pending Payment', value: 'pending_payment' },
         { label: 'Cancelled', value: 'cancelled' },
         { label: 'Transferred', value: 'transferred' },
       ],
@@ -142,6 +143,7 @@ export const Bookings: CollectionConfig = {
       required: true,
       defaultValue: 'CASH',
       options: [
+        { label: 'Razorpay', value: 'RAZORPAY' },
         { label: 'Cash', value: 'CASH' },
         { label: 'Officer UPI', value: 'OFFICER_UPI' },
         { label: 'Complimentary', value: 'COMPLIMENTARY' },
@@ -259,7 +261,7 @@ export const Bookings: CollectionConfig = {
         update: fieldTreasurerOrAdminUpdate,
       },
     },
-    // Pre-wired gateway fields for Razorpay / Cashfree later
+    // Pre-wired gateway fields for Razorpay / Cashfree
     {
       name: 'gatewayProvider',
       type: 'text',
@@ -270,6 +272,22 @@ export const Bookings: CollectionConfig = {
     {
       name: 'gatewayRefId',
       type: 'text',
+      index: true,
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'paymentLinkUrl',
+      type: 'text',
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'paymentExpiresAt',
+      type: 'date',
+      index: true,
       access: {
         update: fieldBookingOfficerOrAdminUpdate,
       },

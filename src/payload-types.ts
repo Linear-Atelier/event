@@ -441,10 +441,10 @@ export interface Booking {
   email?: string | null;
   totalPax: number;
   totalAmount: number;
-  status: 'confirmed' | 'cancelled' | 'transferred';
+  status: 'confirmed' | 'pending_payment' | 'cancelled' | 'transferred';
   notes?: string | null;
   qrSignature?: string | null;
-  paymentMode: 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR';
+  paymentMode: 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR';
   paymentStatus: 'paid' | 'pending' | 'refunded';
   collectedByOfficer?: (number | null) | User;
   settlementStatus: 'with_officer' | 'transferred_to_treasurer' | 'received_by_treasurer';
@@ -459,6 +459,8 @@ export interface Booking {
   treasurerVerifiedBy?: (number | null) | User;
   gatewayProvider?: string | null;
   gatewayRefId?: string | null;
+  paymentLinkUrl?: string | null;
+  paymentExpiresAt?: string | null;
   createdBy?: {
     relationTo: 'users';
     value: number | User;
@@ -559,7 +561,7 @@ export interface NotificationLog {
   id: number;
   booking: number | Booking;
   channel: 'whatsapp' | 'email';
-  trigger: 'booking_created' | 'table_updated' | 'manual_resend' | 'cancelled';
+  trigger: 'booking_created' | 'payment_link_sent' | 'table_updated' | 'manual_resend' | 'cancelled';
   status: 'sent' | 'failed' | 'queued' | 'skipped';
   providerMessageId?: string | null;
   errorMessage?: string | null;
@@ -895,6 +897,8 @@ export interface BookingsSelect<T extends boolean = true> {
   treasurerVerifiedBy?: T;
   gatewayProvider?: T;
   gatewayRefId?: T;
+  paymentLinkUrl?: T;
+  paymentExpiresAt?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;

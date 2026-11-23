@@ -4,6 +4,7 @@ import { generateStyledQrPng } from '@/lib/qr-image'
 
 export type NotificationTrigger =
   | 'booking_created'
+  | 'payment_link_sent'
   | 'table_updated'
   | 'manual_resend'
   | 'cancelled'
@@ -486,4 +487,137 @@ export async function sendBookingNotifications(
   }
 
   return results
+}
+
+export interface SendPaymentLinkEmailInput {
+  payload: Payload
+  bookingId: number
+  bookingCode: string
+  eventName: string
+  eventDate: string
+  eventVenue: string
+  holderName: string
+  email?: string | null
+  totalPax: number
+  totalAmount: number
+  tablesSummary: string
+  ticketCodes: string[]
+  paymentLinkUrl: string
+  expiresInMinutes?: number
+}
+
+/**
+ * Sends a branded Plunk Email payment invoice with the Razorpay Payment Link.
+ * Strictly Email-only — WhatsApp is reserved exclusively for confirmed Master QR Passes.
+ */
+export async function sendPaymentLinkEmail(
+  input: SendPaymentLinkEmailInput,
+): Promise<{ email: string; emailError?: string }> {
+  const plunkKey = process.env.PLUNK_API_KEY
+  if (!input.email) {
+    return { email: 'skipped' }
+  }
+  if (!plunkKey) {
+    await input.payload.create({
+      collection: 'notification-logs',
+      overrideAccess: true,
+      data: {
+        booking: input.bookingId,
+        channel: 'email',
+        trigger: 'payment_link_sent',
+        status: 'skipped',
+        errorMessage: 'PLUNK_API_KEY not configured',
+        sentAt: new Date().toISOString(),
+      },
+    })
+    return { email: 'skipped' }
+  }
+
+  const formattedDate = input.eventDate
+    ? new Date(input.eventDate).toLocaleString('en-IN', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'TBA'
+  const holdMins = input.expiresInMinutes ?? 10
+
+  try {
+    const subject = `Payment Link: ${input.eventName} · ${input.bookingCode} (₹${input.totalAmount.toLocaleString('en-IN')})`
+    const htmlBody = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #e4e4e7; border-radius: 16px; background: #ffffff;">
+        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #71717a;">
+          AIAIA Cochin Branch · Payment Request
+        </div>
+        <h2 style="margin: 8px 0 4px; color: #09090b; font-size: 20px;">${input.eventName}</h2>
+        <p style="margin: 0 0 16px; font-size: 13px; color: #52525b;">
+          Hi ${input.holderName}, your booking <strong>${input.bookingCode}</strong> is currently reserved for <strong>${holdMins} minutes</strong>. Please complete payment below to receive your Master QR Ticket Pass.
+        </p>
+
+        <div style="background: #fafafa; border: 1px solid #e4e4e7; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; font-size: 13px; color: #27272a; line-height: 1.7;">
+          <div><strong>Booking Ref:</strong> ${input.bookingCode}</div>
+          <div><strong>Date & Venue:</strong> ${formattedDate} · ${input.eventVenue}</div>
+          <div><strong>Guests:</strong> ${input.totalPax} Pax (${input.ticketCodes.join(', ')})</div>
+          <div><strong>Tables Reserved:</strong> ${input.tablesSummary}</div>
+          <div style="margin-top: 6px; font-size: 15px;"><strong>Amount Due:</strong> <span style="color: #047857; font-weight: 800;">₹${input.totalAmount.toLocaleString('en-IN')}</span></div>
+        </div>
+
+        <div style="text-align: center; margin: 22px 0;">
+          <a href="${input.paymentLinkUrl}" style="display: inline-block; background: #09090b; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 13px 28px; border-radius: 999px;">
+            Pay ₹${input.totalAmount.toLocaleString('en-IN')} Now
+          </a>
+        </div>
+
+        <p style="margin: 0; font-size: 12px; color: #71717a; text-align: center;">
+          Or copy this link: <a href="${input.paymentLinkUrl}" style="color: #09090b;">${input.paymentLinkUrl}</a>
+        </p>
+        <p style="margin: 12px 0 0; font-size: 12px; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 10px 12px; text-align: center;">
+          This reservation expires automatically in ${holdMins} minutes if unpaid. Once paid, your Master QR Pass will be sent immediately via WhatsApp &amp; Email.
+        </p>
+
+        <div style="border-top: 1px dashed #e4e4e7; margin: 20px 0 12px;"></div>
+        <p style="font-size: 11px; color: #a1a1aa; text-align: center; margin: 0;">
+          Linear Atelier · Ticketing Partner
+        </p>
+      </div>
+    `
+
+    const emailRes = (await input.payload.sendEmail({
+      to: input.email,
+      subject,
+      html: htmlBody,
+    })) as { id?: string } | undefined
+
+    await input.payload.create({
+      collection: 'notification-logs',
+      overrideAccess: true,
+      data: {
+        booking: input.bookingId,
+        channel: 'email',
+        trigger: 'payment_link_sent',
+        status: 'sent',
+        providerMessageId: emailRes?.id || '',
+        sentAt: new Date().toISOString(),
+      },
+    })
+    return { email: 'sent' }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'Plunk payment invoice email failed'
+    await input.payload.create({
+      collection: 'notification-logs',
+      overrideAccess: true,
+      data: {
+        booking: input.bookingId,
+        channel: 'email',
+        trigger: 'payment_link_sent',
+        status: 'failed',
+        errorMessage: errMsg,
+        sentAt: new Date().toISOString(),
+      },
+    })
+    return { email: 'failed', emailError: errMsg }
+  }
 }

@@ -4,6 +4,7 @@ import config from '@payload-config'
 import { getRequestUser } from '@/lib/auth'
 import { expandEventTables } from '@/lib/event-tables'
 import { isPhaseActiveNow } from '@/lib/phase-status'
+import { expireStalePendingBookings } from '@/lib/razorpay'
 import type { Booking, TableType, TicketType } from '@/payload-types'
 
 export async function GET(request: Request) {
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
     }
 
     const payload = await getPayload({ config })
+    await expireStalePendingBookings(payload, eventId)
 
     const [event, ticketTypesRes, tableTypesRes, bookingsRes] = await Promise.all([
       payload.findByID({

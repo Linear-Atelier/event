@@ -33,7 +33,12 @@ export async function GET(request: Request) {
       collection: 'bookings',
       user,
       overrideAccess: false,
-      where: { event: { equals: eventId } },
+      where: {
+        and: [
+          { event: { equals: eventId } },
+          { status: { not_equals: 'pending_payment' } },
+        ],
+      },
       limit: 2000,
       depth: 0,
     })

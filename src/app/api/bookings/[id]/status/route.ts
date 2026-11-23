@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import { getRequestUser, userHasRole } from '@/lib/auth'
+import { cancelRazorpayPaymentLink } from '@/lib/razorpay'
 
 export async function POST(
   request: Request,
@@ -25,6 +26,19 @@ export async function POST(
     const paymentStatus = body.paymentStatus as 'paid' | 'pending' | 'refunded' | undefined
 
     const payload = await getPayload({ config })
+    if (status === 'cancelled') {
+      const existing = await payload.findByID({
+        collection: 'bookings',
+        id: bookingId,
+        user,
+        overrideAccess: false,
+        depth: 0,
+      })
+      if (existing?.gatewayRefId && existing.status === 'pending_payment') {
+        await cancelRazorpayPaymentLink(existing.gatewayRefId)
+      }
+    }
+
     const updateData: Record<string, unknown> = {}
     if (status) updateData.status = status
     if (holderName) updateData.holderName = holderName

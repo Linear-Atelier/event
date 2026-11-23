@@ -3,6 +3,11 @@ import type { Event, TicketType, User } from '@/payload-types'
 import { signQRPayload } from './crypto'
 import { expandEventTables } from './event-tables'
 import { sendBookingNotifications } from './notifications'
+import {
+  createRazorpayPaymentLink,
+  expireStalePendingBookings,
+  RAZORPAY_HOLD_MINUTES,
+} from './razorpay'
 
 export interface TicketPaxInput {
   name: string
@@ -25,7 +30,7 @@ export interface CreateBookingInput {
   holderName: string
   phone: string
   email?: string | null
-  paymentMode: 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR'
+  paymentMode: 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR'
   paymentStatus?: 'paid' | 'pending' | 'refunded'
   notes?: string
   tickets: TicketSelectionInput[]
@@ -231,6 +236,9 @@ export async function createFullBooking(input: CreateBookingInput) {
     }
   }
 
+  // Release any expired 10-minute pending Razorpay holds before checking duplicates/tables
+  await expireStalePendingBookings(payload, eventDoc.id)
+
   // Fetch active bookings for this event (used for both duplicate attendee check and table conflict check)
   const activeBookingsRes = await payload.find({
     collection: 'bookings',
@@ -347,9 +355,13 @@ export async function createFullBooking(input: CreateBookingInput) {
   }
 
   const bookingCode = await generateNextBookingCode(payload, eventDoc.id, eventDoc.code)
+  const isRazorpayPending = input.paymentMode === 'RAZORPAY' && totalAmount > 0
+  const paymentExpiresAt = isRazorpayPending
+    ? new Date(Date.now() + RAZORPAY_HOLD_MINUTES * 60 * 1000).toISOString()
+    : undefined
   const effectivePaymentStatus =
     input.paymentStatus ||
-    (input.paymentMode === 'PAY_AT_DOOR' ? 'pending' : 'paid')
+    (isRazorpayPending || input.paymentMode === 'PAY_AT_DOOR' ? 'pending' : 'paid')
 
   // Create Booking respecting user's RBAC
   const booking = await payload.create({
@@ -365,12 +377,14 @@ export async function createFullBooking(input: CreateBookingInput) {
       email: input.email?.trim() || undefined,
       totalPax,
       totalAmount,
-      status: 'confirmed',
+      status: isRazorpayPending ? 'pending_payment' : 'confirmed',
       notes: input.notes?.trim() || undefined,
       paymentMode: input.paymentMode,
       paymentStatus: effectivePaymentStatus,
       collectedByOfficer: user.id,
       settlementStatus: 'with_officer',
+      gatewayProvider: isRazorpayPending ? 'razorpay' : undefined,
+      paymentExpiresAt,
     },
   })
 
@@ -488,34 +502,92 @@ export async function createFullBooking(input: CreateBookingInput) {
 
   const tablesSummary = tableLabels.length > 0 ? tableLabels.join(', ') : 'Unassigned'
 
-  // Fire WhatsApp + Email notifications (non-fatal)
-  let notificationResult = { whatsapp: 'skipped', email: 'skipped' }
-  try {
-    notificationResult = await sendBookingNotifications({
-      payload,
-      bookingId: booking.id,
-      bookingCode,
-      eventName: eventDoc.name,
-      eventDate: eventDoc.date,
-      eventVenue: eventDoc.venue,
-      holderName: booking.holderName,
-      phone: booking.phone,
-      email: booking.email,
-      totalPax,
-      totalAmount,
-      tablesSummary,
-      ticketCodes: createdTickets.map((t) => t.ticketCode),
-      trigger: 'booking_created',
-    })
-  } catch {
-    // Notification errors never roll back a confirmed booking
+  // If Razorpay pending payment: create Razorpay Payment Link & send Email-only invoice (NO WhatsApp)
+  let paymentLinkUrl: string | null = null
+  let gatewayRefId: string | null = null
+  let notificationResult: { whatsapp: string; email: string } = {
+    whatsapp: 'skipped',
+    email: 'skipped',
+  }
+
+  if (isRazorpayPending) {
+    try {
+      const plink = await createRazorpayPaymentLink({
+        bookingId: booking.id,
+        bookingCode,
+        eventName: eventDoc.name,
+        holderName: booking.holderName,
+        phone: booking.phone,
+        email: booking.email,
+        amountInr: totalAmount,
+        totalPax,
+      })
+      paymentLinkUrl = plink.shortUrl
+      gatewayRefId = plink.id
+
+      await payload.update({
+        collection: 'bookings',
+        id: booking.id,
+        overrideAccess: true,
+        data: {
+          gatewayProvider: 'razorpay',
+          gatewayRefId: plink.id,
+          paymentLinkUrl: plink.shortUrl,
+        },
+      })
+    } catch (err) {
+      // Roll back the hold immediately so tables/attendees are not stranded
+      await payload.update({
+        collection: 'bookings',
+        id: booking.id,
+        overrideAccess: true,
+        data: {
+          status: 'cancelled',
+          notes: `[Cancelled: Razorpay payment link creation failed]`,
+        },
+      })
+      throw err
+    }
+
+    // Razorpay's native SMS & Email handles sending the payment link; no duplicate Plunk email needed.
+    notificationResult = { whatsapp: 'skipped', email: 'skipped' }
+  } else {
+    // Fire WhatsApp + Email Master QR notifications immediately for non-Razorpay bookings
+    try {
+      notificationResult = await sendBookingNotifications({
+        payload,
+        bookingId: booking.id,
+        bookingCode,
+        eventName: eventDoc.name,
+        eventDate: eventDoc.date,
+        eventVenue: eventDoc.venue,
+        holderName: booking.holderName,
+        phone: booking.phone,
+        email: booking.email,
+        totalPax,
+        totalAmount,
+        tablesSummary,
+        ticketCodes: createdTickets.map((t) => t.ticketCode),
+        trigger: 'booking_created',
+      })
+    } catch {
+      // Notification errors never roll back a confirmed booking
+    }
   }
 
   return {
-    booking: { ...booking, qrSignature },
+    booking: {
+      ...booking,
+      qrSignature,
+      paymentLinkUrl,
+      gatewayRefId,
+      paymentExpiresAt: paymentExpiresAt || null,
+    },
     tickets: createdTickets,
     slots: createdSlots,
     tablesSummary,
     notificationResult,
+    paymentLinkUrl,
+    paymentExpiresAt: paymentExpiresAt || null,
   }
 }
