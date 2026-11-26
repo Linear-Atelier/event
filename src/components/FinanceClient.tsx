@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Send,
 } from 'lucide-react'
+import { compareFinancialYearCodesDesc } from '@/lib/financial-year'
 
 export type SettlementStatus =
   | 'with_officer'
@@ -20,6 +21,8 @@ interface FinanceEvent {
   id: number
   code: string
   name: string
+  date: string
+  fyCode: string
 }
 
 interface FinanceBooking {
@@ -43,6 +46,8 @@ interface FinanceBooking {
 
 interface FinanceClientProps {
   events: FinanceEvent[]
+  currentFyCode: string
+  initialFyCode?: string | null
   initialEventId: number | null
   canConfirmReceived: boolean
   canMarkTransferred: boolean
@@ -51,29 +56,65 @@ interface FinanceClientProps {
 
 export function FinanceClient({
   events,
+  currentFyCode,
+  initialFyCode,
   initialEventId,
   canConfirmReceived,
   canMarkTransferred,
   bookings: initialBookings,
 }: FinanceClientProps) {
-  const [selectedEventId, setSelectedEventId] = useState<string>(
-    initialEventId ? String(initialEventId) : 'all',
-  )
+  const defaultFilter = initialEventId
+    ? String(initialEventId)
+    : `fy:${initialFyCode || currentFyCode}`
+  const [selectedFilter, setSelectedFilter] = useState<string>(defaultFilter)
   const [bookings, setBookings] = useState<FinanceBooking[]>(initialBookings)
   const [filterStatus, setFilterStatus] = useState<'all' | SettlementStatus>('with_officer')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
+  const eventFyById = useMemo(
+    () => new Map(events.map((e) => [e.id, e.fyCode])),
+    [events],
+  )
+
+  const availableFys = useMemo(() => {
+    const set = new Set<string>([currentFyCode])
+    if (initialFyCode) set.add(initialFyCode)
+    for (const ev of events) {
+      if (ev.fyCode) set.add(ev.fyCode)
+    }
+    return Array.from(set).sort(compareFinancialYearCodesDesc)
+  }, [events, currentFyCode, initialFyCode])
+
+  const eventsByFy = useMemo(() => {
+    const grouped = new Map<string, FinanceEvent[]>()
+    for (const ev of events) {
+      const list = grouped.get(ev.fyCode) || []
+      list.push(ev)
+      grouped.set(ev.fyCode, list)
+    }
+    return grouped
+  }, [events])
+
+  const selectedFyCode = selectedFilter.startsWith('fy:') ? selectedFilter.slice(3) : null
+
+  const activeScopeLabel = useMemo(() => {
+    if (selectedFyCode) return `${selectedFyCode} · All Events`
+    const ev = events.find((e) => String(e.id) === selectedFilter)
+    return ev ? `${ev.code} — ${ev.name} (${ev.fyCode})` : `${currentFyCode} · All Events`
+  }, [selectedFyCode, selectedFilter, events, currentFyCode])
+
   const activeBookings = useMemo(
     () =>
-      bookings.filter(
-        (b) =>
-          b.status !== 'cancelled' &&
-          b.status !== 'pending_payment' &&
-          (selectedEventId === 'all' || String(b.eventId) === selectedEventId),
-      ),
-    [bookings, selectedEventId],
+      bookings.filter((b) => {
+        if (b.status === 'cancelled' || b.status === 'pending_payment') return false
+        if (selectedFyCode) {
+          return eventFyById.get(b.eventId) === selectedFyCode
+        }
+        return String(b.eventId) === selectedFilter
+      }),
+    [bookings, selectedFyCode, selectedFilter, eventFyById],
   )
 
   const filteredBookings = useMemo(() => {
@@ -123,6 +164,7 @@ export function FinanceClient({
       {
         officerName: string
         bookingCount: number
+        razorpayAmount: number
         cashAmount: number
         upiAmount: number
         doorAmount: number
@@ -138,6 +180,7 @@ export function FinanceClient({
       const curr = map.get(key) || {
         officerName: key,
         bookingCount: 0,
+        razorpayAmount: 0,
         cashAmount: 0,
         upiAmount: 0,
         doorAmount: 0,
@@ -148,7 +191,8 @@ export function FinanceClient({
       }
       curr.bookingCount += 1
       curr.totalAmount += b.totalAmount
-      if (b.paymentMode === 'CASH') curr.cashAmount += b.totalAmount
+      if (b.paymentMode === 'RAZORPAY') curr.razorpayAmount += b.totalAmount
+      else if (b.paymentMode === 'CASH') curr.cashAmount += b.totalAmount
       else if (b.paymentMode === 'OFFICER_UPI') curr.upiAmount += b.totalAmount
       else if (b.paymentMode === 'PAY_AT_DOOR') curr.doorAmount += b.totalAmount
 
@@ -280,10 +324,9 @@ export function FinanceClient({
     }
   }
 
-  const exportHref =
-    selectedEventId === 'all'
-      ? '/api/finance/export'
-      : `/api/finance/export?eventId=${selectedEventId}`
+  const exportHref = selectedFyCode
+    ? `/api/finance/export?fy=${encodeURIComponent(selectedFyCode)}`
+    : `/api/finance/export?eventId=${encodeURIComponent(selectedFilter)}`
 
   const canInteract = canMarkTransferred || canConfirmReceived
 
@@ -292,9 +335,14 @@ export function FinanceClient({
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-neutral-900">
-            Treasurer Finance &amp; Handover Tracking
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold text-neutral-900">
+              Treasurer Finance &amp; Handover Tracking
+            </h1>
+            <span className="rounded-full bg-neutral-100 px-2.5 py-0.5 text-[11px] font-bold text-neutral-700">
+              {activeScopeLabel}
+            </span>
+          </div>
           <p className="text-sm text-neutral-600">
             Track collected funds from Booking Officers to Treasurer receipt, plus AGM Excel/PDF exports.
           </p>
@@ -302,16 +350,33 @@ export function FinanceClient({
 
         <div className="no-print flex flex-wrap items-center gap-2">
           <select
-            value={selectedEventId}
-            onChange={(e) => setSelectedEventId(e.target.value)}
+            value={selectedFilter}
+            onChange={(e) => {
+              setSelectedFilter(e.target.value)
+              setSelectedIds([])
+            }}
             className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-800"
           >
-            <option value="all">All Events</option>
-            {events.map((ev) => (
-              <option key={ev.id} value={String(ev.id)}>
-                {ev.code} — {ev.name}
-              </option>
-            ))}
+            <optgroup label="Financial Cycle (Apr – Mar)">
+              {availableFys.map((fy) => (
+                <option key={fy} value={`fy:${fy}`}>
+                  {fy} · All Events
+                </option>
+              ))}
+            </optgroup>
+            {availableFys.map((fy) => {
+              const fyEvents = eventsByFy.get(fy) || []
+              if (fyEvents.length === 0) return null
+              return (
+                <optgroup key={`events-${fy}`} label={`${fy} Events`}>
+                  {fyEvents.map((ev) => (
+                    <option key={ev.id} value={String(ev.id)}>
+                      {ev.code} — {ev.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+            })}
           </select>
 
           <a
@@ -406,6 +471,9 @@ export function FinanceClient({
                         ₹{o.totalAmount.toLocaleString('en-IN')}
                       </div>
                       <div className="mt-0.5 space-y-0.5 text-[11px] text-neutral-500">
+                        {o.razorpayAmount > 0 && (
+                          <div>Razorpay: ₹{o.razorpayAmount.toLocaleString('en-IN')}</div>
+                        )}
                         <div>Cash: ₹{o.cashAmount.toLocaleString('en-IN')}</div>
                         <div>UPI: ₹{o.upiAmount.toLocaleString('en-IN')}</div>
                         <div>Door: ₹{o.doorAmount.toLocaleString('en-IN')}</div>

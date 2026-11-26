@@ -3,6 +3,7 @@ import { getPayload } from 'payload'
 import { sql } from '@payloadcms/db-postgres/drizzle'
 import config from '@payload-config'
 import { getRequestUser } from '@/lib/auth'
+import { getFinancialYearForDate, parseFinancialYearCode } from '@/lib/financial-year'
 
 export async function GET(request: Request) {
   try {
@@ -12,11 +13,15 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const eventIdParam = searchParams.get('eventId')
     const eventId = eventIdParam ? Number(eventIdParam) : null
+    const fy =
+      parseFinancialYearCode(searchParams.get('fy')) || getFinancialYearForDate(new Date())
 
     const payload = await getPayload({ config })
     const db = payload.db.drizzle
 
-    const eventFilter = eventId ? sql`AND b.event_id = ${eventId}` : sql``
+    const scopeFilter = eventId
+      ? sql`AND b.event_id = ${eventId}`
+      : sql`AND e.date >= ${fy.startIso} AND e.date <= ${fy.endIso}`
 
     const [byPaymentModeRes, byOfficerRes, totalsRes] = await Promise.all([
       db.execute(sql`
@@ -29,7 +34,8 @@ export async function GET(request: Request) {
           COALESCE(SUM(CASE WHEN b.settlement_status = 'transferred_to_treasurer' AND b.treasurer_verified IS NOT TRUE THEN b.total_amount ELSE 0 END), 0)::numeric AS "transferredAmount",
           COALESCE(SUM(CASE WHEN (b.settlement_status = 'with_officer' OR b.settlement_status IS NULL) AND b.treasurer_verified IS NOT TRUE THEN b.total_amount ELSE 0 END), 0)::numeric AS "withOfficerAmount"
         FROM bookings b
-        WHERE b.status != 'cancelled' ${eventFilter}
+        JOIN events e ON e.id = b.event_id
+        WHERE b.status NOT IN ('cancelled', 'pending_payment') ${scopeFilter}
         GROUP BY b.payment_mode
         ORDER BY b.payment_mode
       `),
@@ -40,6 +46,7 @@ export async function GET(request: Request) {
           COALESCE(u.email, '') AS "officerEmail",
           COUNT(*)::int AS "bookingCount",
           COALESCE(SUM(b.total_pax), 0)::int AS "totalPax",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'RAZORPAY' THEN b.total_amount ELSE 0 END), 0)::numeric AS "razorpayAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN b.total_amount ELSE 0 END), 0)::numeric AS "cashAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN b.total_amount ELSE 0 END), 0)::numeric AS "upiAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN b.total_amount ELSE 0 END), 0)::numeric AS "doorAmount",
@@ -48,8 +55,9 @@ export async function GET(request: Request) {
           COALESCE(SUM(CASE WHEN b.settlement_status = 'transferred_to_treasurer' AND b.treasurer_verified IS NOT TRUE THEN b.total_amount ELSE 0 END), 0)::numeric AS "transferredAmount",
           COALESCE(SUM(CASE WHEN (b.settlement_status = 'with_officer' OR b.settlement_status IS NULL) AND b.treasurer_verified IS NOT TRUE THEN b.total_amount ELSE 0 END), 0)::numeric AS "withOfficerAmount"
         FROM bookings b
+        JOIN events e ON e.id = b.event_id
         LEFT JOIN users u ON u.id = b.collected_by_officer_id
-        WHERE b.status != 'cancelled' ${eventFilter}
+        WHERE b.status NOT IN ('cancelled', 'pending_payment') ${scopeFilter}
         GROUP BY u.id, u.name, u.email
         ORDER BY "totalAmount" DESC
       `),
@@ -62,11 +70,13 @@ export async function GET(request: Request) {
           COALESCE(SUM(CASE WHEN b.settlement_status = 'transferred_to_treasurer' AND b.treasurer_verified IS NOT TRUE THEN b.total_amount ELSE 0 END), 0)::numeric AS "transferredRevenue",
           COALESCE(SUM(CASE WHEN (b.settlement_status = 'with_officer' OR b.settlement_status IS NULL) AND b.treasurer_verified IS NOT TRUE THEN b.total_amount ELSE 0 END), 0)::numeric AS "withOfficerRevenue"
         FROM bookings b
-        WHERE b.status != 'cancelled' ${eventFilter}
+        JOIN events e ON e.id = b.event_id
+        WHERE b.status NOT IN ('cancelled', 'pending_payment') ${scopeFilter}
       `),
     ])
 
     return NextResponse.json({
+      financialYear: eventId ? null : fy.code,
       totals: totalsRes.rows[0] || {
         activeBookings: 0,
         totalPax: 0,

@@ -14,6 +14,7 @@ export const TicketTypes: CollectionConfig = {
     update: isSuperAdmin,
     delete: isSuperAdmin,
   },
+  versions: false,
   fields: [
     {
       name: 'name',

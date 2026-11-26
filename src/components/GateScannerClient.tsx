@@ -7,7 +7,6 @@ import {
   CameraOff,
   CheckCircle2,
   Lock,
-  Plus,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -39,14 +38,6 @@ interface EventOption {
   isScanOpen?: boolean
 }
 
-interface DoorPhaseOption {
-  id: string
-  phaseName: string
-  price: number
-  ticketTypeName: string
-  paxMultiplier: number
-}
-
 interface ActiveTicketGroup {
   ticketId: number
   ticketCode: string
@@ -66,7 +57,6 @@ export function GateScannerClient({
   initialEventId,
   canScan,
 }: GateScannerClientProps) {
-  const [tab, setTab] = useState<'scan' | 'door'>('scan')
   const [selectedEventId, setSelectedEventId] = useState<number>(
     initialEventId || events[0]?.id || 0,
   )
@@ -119,16 +109,6 @@ export function GateScannerClient({
   const [scanMethod, setScanMethod] = useState<'qr_scan' | 'manual_code'>('manual_code')
   const [savingCheckin, setSavingCheckin] = useState(false)
 
-  // Door sales state
-  const [doorPhases, setDoorPhases] = useState<DoorPhaseOption[]>([])
-  const [doorName, setDoorName] = useState('')
-  const [doorPhone, setDoorPhone] = useState('')
-  const [doorMode, setDoorMode] = useState<'CASH' | 'OFFICER_UPI' | 'PAY_AT_DOOR'>('CASH')
-  const [doorQty, setDoorQty] = useState<Record<string, number>>({})
-  const [doorPaxNames, setDoorPaxNames] = useState<Record<string, { name: string; touched?: boolean }>>({})
-  const [doorSubmitting, setDoorSubmitting] = useState(false)
-  const [doorSuccess, setDoorSuccess] = useState<string | null>(null)
-
   // Register Service Worker
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -166,21 +146,6 @@ export function GateScannerClient({
       cancelled = true
     }
   }, [selectedEventId])
-
-  // Load door-sale ticket phases when online
-  useEffect(() => {
-    if (!selectedEventId || !isOnline) return
-    fetch(`/api/events/meta?eventId=${selectedEventId}`, { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data) return
-        const allActive = (data.ticketPhases || []).filter(
-          (p: { isActive: boolean }) => p.isActive,
-        )
-        setDoorPhases(allActive)
-      })
-      .catch(() => { })
-  }, [selectedEventId, isOnline])
 
   // Dedicated Web Worker for off-main-thread Push -> Pull sync (auto-runs every 60s)
   useEffect(() => {
@@ -407,7 +372,7 @@ export function GateScannerClient({
 
   // Auto-open camera on mount if camera permission is already granted (only when scan is open)
   useEffect(() => {
-    if (tab !== 'scan' || !isScanOpen || userStoppedCameraRef.current) return
+    if (!isScanOpen || userStoppedCameraRef.current) return
     if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
 
     let cancelled = false
@@ -423,7 +388,7 @@ export function GateScannerClient({
     return () => {
       cancelled = true
     }
-  }, [tab, isScanOpen, startCamera])
+  }, [isScanOpen, startCamera])
 
   useEffect(() => {
     return () => stopCamera()
@@ -461,11 +426,13 @@ export function GateScannerClient({
 
         const matched = allBookings.filter(
           (b) =>
-            b.bookingCode.toLowerCase().includes(q) ||
-            b.holderName.toLowerCase().includes(q) ||
-            b.phone.toLowerCase().includes(q) ||
-            ticketBookingIds.has(b.id) ||
-            slotBookingIds.has(b.id),
+            b.status !== 'cancelled' &&
+            b.status !== 'pending_payment' &&
+            (b.bookingCode.toLowerCase().includes(q) ||
+              b.holderName.toLowerCase().includes(q) ||
+              b.phone.toLowerCase().includes(q) ||
+              ticketBookingIds.has(b.id) ||
+              slotBookingIds.has(b.id)),
         )
         setLookupResults(matched.slice(0, 15))
       })()
@@ -523,85 +490,12 @@ export function GateScannerClient({
     }
   }
 
-  // Selected door-sale tickets expanded for per-pax names
-  const selectedDoorPhases = doorPhases.filter((p) => (doorQty[p.id] || 0) > 0)
-  const firstDoorKey =
-    selectedDoorPhases.length > 0 ? `${selectedDoorPhases[0].id}-0-0` : null
-
-  function getDoorPaxName(key: string): string {
-    const entry = doorPaxNames[key]
-    if (entry?.touched) return entry.name
-    if (key === firstDoorKey) return doorName
-    return entry?.name || ''
-  }
-
-  // Door Sales submit
-  async function handleDoorSaleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const lines: Array<{
-      ticketPhaseId: string
-      quantity: number
-      paxList: Array<{ name: string }>
-    }> = []
-
-    for (const p of selectedDoorPhases) {
-      const quantity = doorQty[p.id] || 0
-      const paxList: Array<{ name: string }> = []
-      for (let tIdx = 0; tIdx < quantity; tIdx++) {
-        for (let pIdx = 0; pIdx < p.paxMultiplier; pIdx++) {
-          const key = `${p.id}-${tIdx}-${pIdx}`
-          const nm = getDoorPaxName(key).trim()
-          if (!nm) {
-            setDoorSuccess(`Please enter a name for every guest on ${p.ticketTypeName}.`)
-            return
-          }
-          paxList.push({ name: nm })
-        }
-      }
-      lines.push({ ticketPhaseId: p.id, quantity, paxList })
-    }
-
-    if (lines.length === 0) return
-    setDoorSubmitting(true)
-    setDoorSuccess(null)
-    try {
-      const res = await fetch('/api/door-sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          eventId: selectedEventId,
-          holderName: doorName,
-          phone: doorPhone,
-          paymentMode: doorMode,
-          tickets: lines,
-          autoCheckInAll: true,
-          deviceId,
-        }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setDoorSuccess(
-          `Walk-in booking ${data.booking.bookingCode} created & checked in (${data.booking.totalPax} pax · ₹${data.booking.totalAmount}).`,
-        )
-        setDoorName('')
-        setDoorPhone('')
-        setDoorQty({})
-        setDoorPaxNames({})
-      } else {
-        setDoorSuccess(data.error || 'Door sale failed')
-      }
-    } finally {
-      setDoorSubmitting(false)
-    }
-  }
-
   return (
-    <div className="fixed inset-x-0 bottom-[70px] top-0 z-10 mx-auto flex max-w-2xl flex-col bg-white">
+    <div className="fixed inset-x-0 bottom-[70px] top-0 z-10 mx-auto flex max-w-2xl flex-col bg-black">
       {/* Top Frosted Glass Scanner Hero */}
-      <div className="glass-surface shrink-0 px-4 py-3.5 text-white">
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300">
+      <div className="shrink-0 px-4 py-3.5 text-white">
+        <div className="flex flex-wrap justify-between gap-2.5">
+          <div className="flex flex-col items-start gap-2 text-xs text-neutral-300">
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
                 }`}
@@ -622,7 +516,7 @@ export function GateScannerClient({
               }
               setSelectedEventId(nextId)
             }}
-            className="rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-white"
+            className="rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-white"
           >
             {events.map((ev) => (
               <option key={ev.id} value={ev.id}>
@@ -683,241 +577,79 @@ export function GateScannerClient({
         </div>
       )}
 
-      {tab === 'scan' ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          {/* Center Camera Viewport / Centered Camera Toggle */}
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
-            {cameraActive ? (
-              <div className="relative h-full w-full bg-black">
-                <video
-                  ref={videoRef}
-                  playsInline
-                  muted
-                  className="h-full w-full object-cover"
-                />
-                <canvas ref={canvasRef} className="hidden" />
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-52 w-52 rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
-                </div>
-                <div className="absolute inset-x-0 bottom-4 flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      userStoppedCameraRef.current = true
-                      stopCamera()
-                    }}
-                    className="inline-flex items-center gap-2 rounded-full bg-neutral-950/80 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-rose-600"
-                  >
-                    <CameraOff className="h-4 w-4" />
-                    Stop Camera
-                  </button>
-                </div>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* Center Camera Viewport / Centered Camera Toggle */}
+        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
+          {cameraActive ? (
+            <div className="relative h-full w-full bg-black">
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                className="h-full w-full object-cover"
+              />
+              <canvas ref={canvasRef} className="hidden" />
+              {/* Top & bottom black vignette gradients blending camera feed into header and manual lookup */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-black via-black/45 to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-24 bg-gradient-to-t from-black via-black/55 to-transparent" />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div className="h-52 w-52 rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
               </div>
-            ) : !isScanOpen ? (
-              <div className="flex flex-col items-center justify-center px-6 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-neutral-300">
-                  <Lock className="h-5 w-5" />
-                </div>
-                <p className="mt-3 text-sm font-bold text-white">
-                  Gate Check-In Opens on{' '}
-                  {selectedEvent ? formatEventDayLabel(selectedEvent.date) : 'Event Day'}
-                </p>
-                <p className="mt-1 max-w-xs text-xs text-neutral-400">
-                  Scanning is disabled until the date of the event. You can still tap Sync above to pre-download the offline roster.
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center px-6 text-center">
+              <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center">
                 <button
                   type="button"
                   onClick={() => {
-                    userStoppedCameraRef.current = false
-                    void startCamera()
+                    userStoppedCameraRef.current = true
+                    stopCamera()
                   }}
-                  className="glass-surface inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-sm font-bold text-white shadow-xl transition hover:scale-[1.02] active:scale-[0.98]"
+                  className="inline-flex items-center gap-2 rounded-full bg-neutral-950/80 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-rose-600"
                 >
-                  <Camera className="h-5 w-5 text-white" />
-                  Start Camera
+                  <CameraOff className="h-4 w-4" />
+                  Stop Camera
                 </button>
-                <p className="mt-3 text-xs text-neutral-400">
-                  Tap to scan Master QR passes offline
-                </p>
-                {cameraError && (
-                  <p className="mt-2 max-w-xs text-xs font-medium text-rose-600">
-                    {cameraError}
-                  </p>
-                )}
               </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* DOOR SALES / WALK-IN ENTRY */
-        <form
-          onSubmit={handleDoorSaleSubmit}
-          className="space-y-4 py-1"
-        >
-          <h2 className="text-sm font-bold text-neutral-900">
-            Fast Walk-In / Door Sales Entry (Auto Check-In)
-          </h2>
-
-          {!isOnline && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-              Door Sales requires internet connectivity to create a new booking on the server.
             </div>
-          )}
-
-          {doorSuccess && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-900">
-              {doorSuccess}
+          ) : !isScanOpen ? (
+            <div className="flex flex-col items-center justify-center px-6 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-neutral-300">
+                <Lock className="h-5 w-5" />
+              </div>
+              <p className="mt-3 text-sm font-bold text-white">
+                Gate Check-In Opens on{' '}
+                {selectedEvent ? formatEventDayLabel(selectedEvent.date) : 'Event Day'}
+              </p>
+              <p className="mt-1 max-w-xs text-xs text-neutral-400">
+                Scanning is disabled until the date of the event. You can still tap Sync above to pre-download the offline roster.
+              </p>
             </div>
-          )}
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-neutral-700">
-                Guest Name *
-              </label>
-              <input
-                type="text"
-                required
-                value={doorName}
-                onChange={(e) => setDoorName(e.target.value)}
-                placeholder="Walk-in Guest Name"
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-neutral-700">
-                Phone *
-              </label>
-              <input
-                type="tel"
-                required
-                value={doorPhone}
-                onChange={(e) => setDoorPhone(e.target.value)}
-                placeholder="9847012345"
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-xs font-medium text-neutral-700">
-              Select Walk-In Tickets
-            </label>
-            {doorPhases.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-xs"
+          ) : (
+            <div className="flex flex-col items-center justify-center px-6 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  userStoppedCameraRef.current = false
+                  void startCamera()
+                }}
+                className="glass-surface inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-sm font-bold text-white shadow-xl transition hover:scale-[1.02] active:scale-[0.98]"
               >
-                <div>
-                  <span className="font-bold text-neutral-900">{p.ticketTypeName}</span>{' '}
-                  <span className="text-neutral-500">
-                    ({p.phaseName} · {p.paxMultiplier} pax · ₹{p.price})
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDoorQty((prev) => ({
-                        ...prev,
-                        [p.id]: Math.max(0, (prev[p.id] || 0) - 1),
-                      }))
-                    }
-                    className="rounded border border-neutral-300 px-2 py-0.5 font-bold"
-                  >
-                    -
-                  </button>
-                  <span className="w-5 text-center font-bold">{doorQty[p.id] || 0}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDoorQty((prev) => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))
-                    }
-                    className="rounded bg-neutral-900 px-2 py-0.5 font-bold text-white"
-                  >
-                    <Plus className="h-3 w-3" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {selectedDoorPhases.length > 0 && (
-            <div className="space-y-2.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-              <div className="text-xs font-bold text-neutral-800">
-                Attendee Names (Required for Every Pax)
-              </div>
-              {selectedDoorPhases.map((p) => {
-                const qty = doorQty[p.id] || 0
-                return Array.from({ length: qty }).map((_, tIdx) => (
-                  <div
-                    key={`${p.id}-${tIdx}`}
-                    className="space-y-1.5 rounded-md border border-neutral-200 bg-white p-2.5"
-                  >
-                    <div className="text-[11px] font-bold text-neutral-700">
-                      Ticket #{tIdx + 1} · {p.ticketTypeName} ({p.phaseName}) — {p.paxMultiplier}{' '}
-                      Pax
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {Array.from({ length: p.paxMultiplier }).map((__, pIdx) => {
-                        const key = `${p.id}-${tIdx}-${pIdx}`
-                        return (
-                          <input
-                            key={key}
-                            type="text"
-                            required
-                            value={getDoorPaxName(key)}
-                            onChange={(e) =>
-                              setDoorPaxNames((prev) => ({
-                                ...prev,
-                                [key]: { name: e.target.value, touched: true },
-                              }))
-                            }
-                            placeholder={`Guest ${pIdx + 1} Full Name *`}
-                            className="w-full rounded border border-neutral-300 px-2.5 py-1.5 text-xs focus:border-neutral-900 focus:outline-none"
-                          />
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))
-              })}
+                <Camera className="h-5 w-5 text-white" />
+                Start Camera
+              </button>
+              <p className="mt-3 text-xs text-neutral-400">
+                Tap to scan Master QR passes offline
+              </p>
+              {cameraError && (
+                <p className="mt-2 max-w-xs text-xs font-medium text-rose-600">
+                  {cameraError}
+                </p>
+              )}
             </div>
           )}
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-700">
-              Payment Mode
-            </label>
-            <select
-              value={doorMode}
-              onChange={(e) =>
-                setDoorMode(e.target.value as 'CASH' | 'OFFICER_UPI' | 'PAY_AT_DOOR')
-              }
-              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value="CASH">Cash at Gate</option>
-              <option value="OFFICER_UPI">Officer UPI</option>
-              <option value="PAY_AT_DOOR">Pay at Door (Pending)</option>
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            disabled={!canScan || !isOnline || doorSubmitting}
-            className="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {doorSubmitting ? 'Processing Walk-In…' : 'Complete Door Sale & Check In'}
-          </button>
-        </form>
-      )}
-
+        </div>
+      </div>
 
       {/* Offline Manual Lookup (Dark Frosted Glass Sheet at Bottom) */}
-      <div className="glass-surface px-4 py-4 pb-6 text-white">
+      <div className="px-4 py-4 pb-6 text-white">
         <h2 className="text-sm font-bold text-white">
           Manual Lookup
         </h2>
@@ -963,7 +695,7 @@ export function GateScannerClient({
 
       {/* PRE-TICKED ATTENDEE CHECKLIST MODAL */}
       {activeBooking && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-neutral-950/70 p-4 sm:items-center">
+        <div className="fixed inset-0 bottom-20 z-50 flex items-end justify-center bg-neutral-950/70 p-4 sm:items-center">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between">
               <div>

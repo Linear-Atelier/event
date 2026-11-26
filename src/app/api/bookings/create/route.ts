@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    if (!userHasRole(user, ['booking_officer', 'gate_staff', 'super_admin'])) {
+    if (!userHasRole(user, ['booking_officer', 'super_admin'])) {
       return NextResponse.json({ error: 'Forbidden: Booking Officer role required' }, { status: 403 })
     }
 

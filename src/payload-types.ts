@@ -321,7 +321,7 @@ export interface Event {
   icon?: string | null;
   iconSvg?: string | null;
   /**
-   * Define each pricing phase (e.g. Early-Bird, Phase 1, Door Sales) with optional auto-start/end dates, and select reusable Ticket Types from the dropdown.
+   * Define each pricing phase (e.g. Early-Bird, Phase 1, Final Phase) with optional auto-start/end dates, and select reusable Ticket Types from the dropdown.
    */
   phases?:
     | {
@@ -541,7 +541,7 @@ export interface TicketCheckinSlot {
   checkedInAt?: string | null;
   checkedInByUser?: (number | null) | User;
   deviceId?: string | null;
-  method?: ('qr_scan' | 'manual_code' | 'door_sale') | null;
+  method?: ('qr_scan' | 'manual_code') | null;
   createdBy?: {
     relationTo: 'users';
     value: number | User;

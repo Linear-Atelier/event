@@ -2,7 +2,7 @@ import type { CollectionConfig } from 'payload'
 import {
   gateStaffUncheckedOnly,
   isAuthenticated,
-  isBookingOrGateOrAdmin,
+  isBookingOfficerOrAdmin,
   isSuperAdmin,
 } from '../access/roles'
 
@@ -14,7 +14,7 @@ export const TicketCheckinSlots: CollectionConfig = {
   },
   access: {
     read: isAuthenticated,
-    create: isBookingOrGateOrAdmin,
+    create: isBookingOfficerOrAdmin,
     update: gateStaffUncheckedOnly,
     delete: isSuperAdmin,
   },
@@ -77,7 +77,6 @@ export const TicketCheckinSlots: CollectionConfig = {
       options: [
         { label: 'QR Scan', value: 'qr_scan' },
         { label: 'Manual Code', value: 'manual_code' },
-        { label: 'Door Sale', value: 'door_sale' },
       ],
     },
   ],

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { getServerUser } from '@/lib/auth'
 import { isScanAllowedForEventDate } from '@/lib/event-date'
+import { getFinancialYearForDate } from '@/lib/financial-year'
 import { EventCard, type EventListItem } from '@/components/EventCard'
 
 export const dynamic = 'force-dynamic'
@@ -31,13 +32,25 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
       collection: 'bookings',
       user,
       overrideAccess: false,
-      where: { status: { not_equals: 'cancelled' } },
+      where: { status: { not_in: ['cancelled', 'pending_payment'] } },
       limit: 2000,
       depth: 0,
     }),
   ])
 
-  const cutoffMs = Date.now() - 24 * 60 * 60 * 1000
+  const now = new Date()
+  const currentFy = getFinancialYearForDate(now)
+  const fyEventIds = new Set(
+    eventsRes.docs
+      .filter((ev) => getFinancialYearForDate(ev.date).code === currentFy.code)
+      .map((ev) => ev.id),
+  )
+  const fyBookings = bookingsRes.docs.filter((b) => {
+    const evId = typeof b.event === 'object' ? b.event.id : b.event
+    return fyEventIds.has(evId)
+  })
+
+  const cutoffMs = now.getTime() - 24 * 60 * 60 * 1000
   const upcomingEvents = eventsRes.docs.filter((ev) => {
     const ms = new Date(ev.date).getTime()
     return Number.isNaN(ms) || ms >= cutoffMs
@@ -69,10 +82,11 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
   }
 
   return {
-    eventsCount: eventsRes.totalDocs,
-    totalBookings: bookingsRes.totalDocs,
-    totalPax: bookingsRes.docs.reduce((sum, b) => sum + (b.totalPax || 0), 0),
-    totalRevenue: bookingsRes.docs.reduce((sum, b) => sum + (b.totalAmount || 0), 0),
+    fyCode: currentFy.code,
+    eventsCount: fyEventIds.size,
+    totalBookings: fyBookings.length,
+    totalPax: fyBookings.reduce((sum, b) => sum + (b.totalPax || 0), 0),
+    totalRevenue: fyBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0),
     nextEvent,
   }
 }
@@ -83,7 +97,7 @@ export default async function HomePage() {
     redirect('/login')
   }
 
-  const { eventsCount, totalBookings, totalPax, totalRevenue, nextEvent } =
+  const { fyCode, eventsCount, totalBookings, totalPax, totalRevenue, nextEvent } =
     await loadHomeData(user)
   const firstName = (user.name || user.email || 'Committee').split(' ')[0]
 
@@ -91,7 +105,7 @@ export default async function HomePage() {
     {
       href: '/events',
       label: 'Events',
-      subtitle: `${eventsCount} active`,
+      subtitle: `${eventsCount} in ${fyCode}`,
       icon: Calendar,
       accent: 'from-neutral-900 via-neutral-900 to-neutral-950',
       iconBg: 'bg-white/15 text-white',
@@ -107,7 +121,7 @@ export default async function HomePage() {
     {
       href: '/scan',
       label: 'Gate',
-      subtitle: 'QR scan & walk-ins',
+      subtitle: 'QR scan & check-in',
       icon: QrCode,
       accent: 'from-neutral-900 via-neutral-900 to-neutral-950',
       iconBg: 'bg-white/15 text-white',
@@ -115,7 +129,7 @@ export default async function HomePage() {
     {
       href: '/finance',
       label: 'Finance',
-      subtitle: `₹${totalRevenue.toLocaleString('en-IN')} collected`,
+      subtitle: `₹${totalRevenue.toLocaleString('en-IN')} · ${fyCode}`,
       icon: Wallet,
       accent: 'from-neutral-900 via-neutral-900 to-neutral-950',
       iconBg: 'bg-white/15 text-white',

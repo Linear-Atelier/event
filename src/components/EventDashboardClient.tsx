@@ -8,6 +8,7 @@ import {
   Clock,
   CreditCard,
   LayoutGrid,
+  Loader2,
   Lock,
   QrCode,
   RefreshCw,
@@ -380,32 +381,189 @@ export function EventDashboardClient({
 
       {/* BOOKINGS TAB */}
       {activeTab === 'bookings' && (
-        <div className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
+        <div className="space-y-4 pb-16">
+          <div className="space-y-2.5">
+            <div className="relative max-w-md">
+              <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-zinc-400" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search B042, B042-T01, holder name, or phone..."
-                className="w-full rounded-lg border border-neutral-300 bg-white py-2 pl-9 pr-3 text-sm focus:border-neutral-900 focus:outline-none"
+                placeholder="Search code, ticket, holder name, or phone..."
+                className="w-full rounded-2xl border border-zinc-200 bg-zinc-50/70 py-2.5 pl-10 pr-4 text-sm text-zinc-900 placeholder-zinc-400 transition focus:border-zinc-900 focus:bg-white focus:outline-none"
               />
             </div>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-700"
-            >
-              <option value="all">All Statuses</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="transferred">Transferred</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { key: 'all', label: `All (${bookings.length})` },
+                  {
+                    key: 'confirmed',
+                    label: `Confirmed (${bookings.filter((b) => b.status === 'confirmed').length})`,
+                  },
+                  {
+                    key: 'pending_payment',
+                    label: `Pending (${bookings.filter((b) => b.status === 'pending_payment').length})`,
+                  },
+                  {
+                    key: 'transferred',
+                    label: `Transferred (${bookings.filter((b) => b.status === 'transferred').length})`,
+                  },
+                  {
+                    key: 'cancelled',
+                    label: `Cancelled (${bookings.filter((b) => b.status === 'cancelled').length})`,
+                  },
+                ] as const
+              ).map((pill) => (
+                <button
+                  key={pill.key}
+                  type="button"
+                  onClick={() => setStatusFilter(pill.key)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                    statusFilter === pill.key
+                      ? 'bg-zinc-900 text-white'
+                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200/80'
+                  }`}
+                >
+                  {pill.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Booking Cards */}
+          <div className="space-y-3 md:hidden">
+            {filteredBookings.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/70 px-4 py-12 text-center">
+                <Ticket className="mx-auto h-7 w-7 text-zinc-300" />
+                <p className="mt-2 text-sm font-semibold text-zinc-700">No matching bookings</p>
+                <p className="mt-0.5 text-xs text-zinc-400">
+                  Try clearing your search or switching the status filter above.
+                </p>
+              </div>
+            ) : (
+              filteredBookings.map((b) => {
+                const isUnderAllocated = b.allocatedSeats > 0 && b.allocatedSeats < b.totalPax
+                const allCheckedIn = b.totalPax > 0 && b.checkedInPax >= b.totalPax
+                return (
+                  <div
+                    key={b.id}
+                    className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white ${
+                      b.status === 'cancelled' ? 'opacity-65' : ''
+                    }`}
+                  >
+                    <div className="px-4 py-3.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[15px] font-bold leading-snug text-zinc-900">
+                              {b.holderName}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                b.status === 'confirmed'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : b.status === 'pending_payment'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : b.status === 'transferred'
+                                      ? 'bg-sky-100 text-sky-800'
+                                      : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {b.status === 'pending_payment' ? 'PENDING' : b.status}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-500 tabular-nums">
+                            <span className="font-semibold text-zinc-800">{b.bookingCode}</span>
+                            <span>·</span>
+                            <span>{b.phone}</span>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-right tabular-nums">
+                          <div className="text-sm font-bold text-zinc-900">
+                            ₹{b.totalAmount.toLocaleString('en-IN')}
+                          </div>
+                          <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] font-semibold">
+                            <span className="text-zinc-500">{b.paymentMode}</span>
+                            {b.treasurerVerified ? (
+                              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                            ) : (
+                              <Clock className="h-3 w-3 text-amber-600" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Compact Status Chips */}
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums">
+                        <span
+                          className={`rounded-md px-2 py-0.5 font-semibold ${
+                            allCheckedIn
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-zinc-100 text-zinc-700'
+                          }`}
+                        >
+                          Check-in: {b.checkedInPax}/{b.totalPax}
+                        </span>
+                        <span
+                          className={`rounded-md px-2 py-0.5 font-semibold ${
+                            isUnderAllocated
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-zinc-100 text-zinc-700'
+                          }`}
+                        >
+                          Table: {b.tablesSummary}
+                        </span>
+                        <span className="rounded-md bg-zinc-100 px-2 py-0.5 font-medium text-zinc-600">
+                          Stubs: {b.physicalIssuedCount}/{b.totalTicketCount}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-1 text-[11px] text-zinc-500">
+                        <span className="truncate">{b.ticketCodes.join(', ')}</span>
+                        <span className="shrink-0">By {b.collectedByName}</span>
+                      </div>
+                    </div>
+
+                    {/* Touch-Friendly Mobile Action Footer */}
+                    <div className="flex items-center gap-2 border-t border-zinc-100 bg-zinc-50/50 px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => setQrModalBooking(b)}
+                        className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800"
+                      >
+                        <QrCode className="h-3.5 w-3.5" />
+                        QR Pass
+                      </button>
+                      <button
+                        type="button"
+                        disabled={resendingId === b.id}
+                        onClick={() => handleResend(b.id)}
+                        className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-800 transition hover:bg-zinc-100 disabled:opacity-50"
+                      >
+                        {resendingId === b.id ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Sending…
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-3.5 w-3.5 text-zinc-500" />
+                            Resend
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {/* Desktop Bookings Table */}
+          <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
               <thead className="border-b border-neutral-200 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
                 <tr>
@@ -439,12 +597,14 @@ export function EventDashboardClient({
                         className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
                           b.status === 'confirmed'
                             ? 'bg-emerald-100 text-emerald-800'
-                            : b.status === 'transferred'
+                            : b.status === 'pending_payment'
                               ? 'bg-amber-100 text-amber-800'
-                              : 'bg-rose-100 text-rose-800'
+                              : b.status === 'transferred'
+                                ? 'bg-sky-100 text-sky-800'
+                                : 'bg-rose-100 text-rose-800'
                         }`}
                       >
-                        {b.status}
+                        {b.status === 'pending_payment' ? 'PENDING' : b.status}
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -492,7 +652,11 @@ export function EventDashboardClient({
                           onClick={() => handleResend(b.id)}
                           className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-[11px] font-medium text-neutral-900 hover:bg-neutral-200/80 disabled:opacity-50"
                         >
-                          <Send className="h-3 w-3" />
+                          {resendingId === b.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Send className="h-3 w-3" />
+                          )}
                           {resendingId === b.id ? '...' : 'Resend'}
                         </button>
                       </div>
@@ -648,27 +812,84 @@ export function EventDashboardClient({
 
       {/* LIVE ATTENDANCE TAB */}
       {activeTab === 'attendance' && (
-        <div className="space-y-5">
-          <div className="flex items-center justify-between border-b border-dashed border-neutral-200 pb-4">
-            <div>
-              <div className="text-base font-bold text-neutral-950">
-                {checkedInSlots} of {totalSlots} guests checked in ({attendancePct}%)
+        <div className="space-y-4 pb-16">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-base font-bold text-zinc-950 tabular-nums">
+                  {checkedInSlots} of {totalSlots} guests checked in ({attendancePct}%)
+                </div>
+                <div className="mt-0.5 text-xs text-zinc-500 tabular-nums">
+                  {Math.max(0, totalSlots - checkedInSlots)} pending arrival
+                </div>
               </div>
-              <div className="text-xs text-neutral-500">
-                {totalSlots - checkedInSlots} pending arrival
-              </div>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-zinc-100 px-3 py-2 text-xs font-bold text-zinc-800 transition hover:bg-zinc-200"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-1.5 rounded-2xl bg-neutral-100 px-3.5 py-2 text-xs font-bold text-neutral-700 transition hover:bg-neutral-200"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </button>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-100">
+              <div
+                className="h-full rounded-full bg-emerald-600 transition-all"
+                style={{ width: `${Math.min(100, attendancePct)}%` }}
+              />
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Grouped Attendance List */}
+          <div className="md:hidden">
+            {recentCheckins.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/70 px-4 py-12 text-center">
+                <CheckCircle2 className="mx-auto h-7 w-7 text-zinc-300" />
+                <p className="mt-2 text-sm font-semibold text-zinc-700">No check-ins yet</p>
+                <p className="mt-0.5 text-xs text-zinc-400">
+                  Arrivals scanned at the gate will appear here live.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white">
+                {recentCheckins.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-start justify-between gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-zinc-900">
+                        {c.label}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-500">
+                        <span className="font-semibold text-zinc-700">{c.bookingCode}</span>
+                        <span>·</span>
+                        <span className="truncate">{c.holderName}</span>
+                      </div>
+                      <div className="mt-1 text-[11px] text-zinc-400">
+                        By {c.checkedInByName} · {c.deviceId}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 text-right tabular-nums">
+                      <div className="text-xs font-bold text-zinc-900">
+                        {new Date(c.checkedInAt).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                      <span className="mt-1 inline-block rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-zinc-600">
+                        {c.method === 'manual_code' ? 'Manual' : 'QR Scan'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Desktop Attendance Table */}
+          <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
               <thead className="border-b border-neutral-200 text-[11px] font-semibold uppercase text-neutral-400">
                 <tr>
@@ -682,7 +903,7 @@ export function EventDashboardClient({
               <tbody className="divide-y divide-neutral-100">
                 {recentCheckins.map((c) => (
                   <tr key={c.id}>
-                    <td className="px-4 py-2.5 text-neutral-600">
+                    <td className="px-4 py-2.5 text-neutral-600 tabular-nums">
                       {new Date(c.checkedInAt).toLocaleTimeString('en-IN', {
                         hour: '2-digit',
                         minute: '2-digit',

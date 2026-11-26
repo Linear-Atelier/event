@@ -3,7 +3,7 @@ import {
   fieldBookingOfficerOrAdminUpdate,
   fieldTreasurerOrAdminUpdate,
   isAuthenticated,
-  isBookingOrGateOrAdmin,
+  isBookingOfficerOrAdmin,
   isBookingOrTreasurerOrAdmin,
   isSuperAdmin,
 } from '../access/roles'
@@ -25,11 +25,12 @@ export const Bookings: CollectionConfig = {
   },
   access: {
     read: isAuthenticated,
-    create: isBookingOrGateOrAdmin,
+    create: isBookingOfficerOrAdmin,
     update: isBookingOrTreasurerOrAdmin,
     // Never hard-delete bookings; use status: 'cancelled' with audit history
     delete: isSuperAdmin,
   },
+  versions: false,
   fields: [
     {
       name: 'bookingCode',

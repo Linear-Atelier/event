@@ -35,9 +35,6 @@ export interface CreateBookingInput {
   notes?: string
   tickets: TicketSelectionInput[]
   tables?: TableAssignmentInput[]
-  autoCheckInAll?: boolean
-  deviceId?: string
-  checkInMethod?: 'qr_scan' | 'manual_code' | 'door_sale'
 }
 
 function normalizeAttendeeName(name: string): string {
@@ -445,7 +442,6 @@ export async function createFullBooking(input: CreateBookingInput) {
       createdTickets.push(ticketDoc)
 
       // Expand into individual attendee check-in slots
-      const nowIso = new Date().toISOString()
       for (let s = 1; s <= paxPerTicket; s++) {
         const flatIdx = i * paxPerTicket + (s - 1)
         const paxEntry = line.paxList[flatIdx]
@@ -466,10 +462,7 @@ export async function createFullBooking(input: CreateBookingInput) {
             label,
             attendeeName: paxName,
             member: paxEntry.memberId ?? undefined,
-            checkedInAt: input.autoCheckInAll ? nowIso : undefined,
-            checkedInByUser: input.autoCheckInAll ? user.id : undefined,
-            deviceId: input.autoCheckInAll ? input.deviceId || 'GATE-DOOR' : undefined,
-            method: input.autoCheckInAll ? input.checkInMethod || 'door_sale' : 'qr_scan',
+            method: 'qr_scan',
           },
         })
         createdSlots.push(slotDoc)

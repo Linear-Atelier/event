@@ -36,7 +36,7 @@ export async function GET(request: Request) {
       where: {
         and: [
           { event: { equals: eventId } },
-          { status: { not_equals: 'pending_payment' } },
+          { status: { not_in: ['cancelled', 'pending_payment'] } },
         ],
       },
       limit: 2000,

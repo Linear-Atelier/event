@@ -13,6 +13,7 @@ export const BookingTables: CollectionConfig = {
     update: isBookingOfficerOrAdmin,
     delete: isBookingOfficerOrAdmin,
   },
+  versions: false,
   fields: [
     {
       name: 'booking',

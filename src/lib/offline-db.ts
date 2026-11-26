@@ -55,7 +55,7 @@ export interface PendingSyncItem {
   bookingId: number
   checkedInAt: string
   deviceId: string
-  method: 'qr_scan' | 'manual_code' | 'door_sale'
+  method: 'qr_scan' | 'manual_code'
   synced: number // 0 = pending, 1 = synced
 }
 

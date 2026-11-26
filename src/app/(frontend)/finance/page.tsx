@@ -3,19 +3,22 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import { getServerUser, userHasRole } from '@/lib/auth'
+import { getFinancialYearForDate, parseFinancialYearCode } from '@/lib/financial-year'
 import { FinanceClient, type SettlementStatus } from '@/components/FinanceClient'
 import type { Event, User } from '@/payload-types'
 
 export const dynamic = 'force-dynamic'
 
 export default async function FinancePage(props: {
-  searchParams: Promise<{ eventId?: string }>
+  searchParams: Promise<{ eventId?: string; fy?: string }>
 }) {
   const user = await getServerUser()
   if (!user) redirect('/login')
 
   const sp = await props.searchParams
   const initialEventId = sp.eventId ? Number(sp.eventId) : null
+  const currentFy = getFinancialYearForDate(new Date())
+  const requestedFy = parseFinancialYearCode(sp.fy)?.code || null
   const payload = await getPayload({ config })
 
   const [eventsRes, bookingsRes] = await Promise.all([
@@ -52,7 +55,11 @@ export default async function FinancePage(props: {
             id: e.id,
             code: e.code,
             name: e.name,
+            date: e.date,
+            fyCode: getFinancialYearForDate(e.date).code,
           }))}
+          currentFyCode={currentFy.code}
+          initialFyCode={requestedFy}
           initialEventId={initialEventId}
           canConfirmReceived={canConfirmReceived}
           canMarkTransferred={canMarkTransferred}

@@ -4,6 +4,7 @@ import { sql } from '@payloadcms/db-postgres/drizzle'
 import ExcelJS from 'exceljs'
 import config from '@payload-config'
 import { getRequestUser } from '@/lib/auth'
+import { getFinancialYearForDate, parseFinancialYearCode } from '@/lib/financial-year'
 import type { Event, User } from '@/payload-types'
 
 export async function GET(request: Request) {
@@ -14,34 +15,83 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const eventIdParam = searchParams.get('eventId')
     const eventId = eventIdParam ? Number(eventIdParam) : null
+    const fy =
+      parseFinancialYearCode(searchParams.get('fy')) || getFinancialYearForDate(new Date())
 
     const payload = await getPayload({ config })
     const db = payload.db.drizzle
-    const eventFilter = eventId ? sql`AND b.event_id = ${eventId}` : sql``
 
-    const [bookingsRes, byOfficerRes, byModeRes] = await Promise.all([
-      payload.find({
-        collection: 'bookings',
+    let fyEventIds: number[] = []
+    let scopeSlug = fy.code
+    if (eventId) {
+      const ev = await payload
+        .findByID({
+          collection: 'events',
+          id: eventId,
+          user,
+          overrideAccess: false,
+          depth: 0,
+        })
+        .catch(() => null)
+      scopeSlug = ev?.code || String(eventId)
+    } else {
+      const fyEventsRes = await payload.find({
+        collection: 'events',
         user,
         overrideAccess: false,
-        where: eventId ? { event: { equals: eventId } } : undefined,
-        sort: 'bookingCode',
-        limit: 2000,
-        depth: 1,
-      }),
+        where: {
+          and: [
+            { date: { greater_than_equal: fy.startIso } },
+            { date: { less_than_equal: fy.endIso } },
+          ],
+        },
+        limit: 200,
+        depth: 0,
+      })
+      fyEventIds = fyEventsRes.docs.map((e) => e.id)
+    }
+
+    const scopeFilter = eventId
+      ? sql`AND b.event_id = ${eventId}`
+      : sql`AND e.date >= ${fy.startIso} AND e.date <= ${fy.endIso}`
+
+    const [bookingsRes, byOfficerRes, byModeRes] = await Promise.all([
+      eventId
+        ? payload.find({
+            collection: 'bookings',
+            user,
+            overrideAccess: false,
+            where: { event: { equals: eventId } },
+            sort: 'bookingCode',
+            limit: 2000,
+            depth: 1,
+          })
+        : fyEventIds.length > 0
+          ? payload.find({
+              collection: 'bookings',
+              user,
+              overrideAccess: false,
+              where: { event: { in: fyEventIds } },
+              sort: 'bookingCode',
+              limit: 2000,
+              depth: 1,
+            })
+          : Promise.resolve({ docs: [] }),
       db.execute(sql`
         SELECT
           COALESCE(u.name, 'Unassigned') AS "officerName",
           COUNT(*)::int AS "bookingCount",
           COALESCE(SUM(b.total_pax), 0)::int AS "totalPax",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'RAZORPAY' THEN b.total_amount ELSE 0 END), 0)::numeric AS "razorpayAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN b.total_amount ELSE 0 END), 0)::numeric AS "cashAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN b.total_amount ELSE 0 END), 0)::numeric AS "upiAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN b.total_amount ELSE 0 END), 0)::numeric AS "doorAmount",
           COALESCE(SUM(b.total_amount), 0)::numeric AS "totalAmount",
           COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN b.total_amount ELSE 0 END), 0)::numeric AS "verifiedAmount"
         FROM bookings b
+        JOIN events e ON e.id = b.event_id
         LEFT JOIN users u ON u.id = b.collected_by_officer_id
-        WHERE b.status != 'cancelled' ${eventFilter}
+        WHERE b.status NOT IN ('cancelled', 'pending_payment') ${scopeFilter}
         GROUP BY u.id, u.name
         ORDER BY "totalAmount" DESC
       `),
@@ -53,7 +103,8 @@ export async function GET(request: Request) {
           COALESCE(SUM(b.total_amount), 0)::numeric AS "totalAmount",
           COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN b.total_amount ELSE 0 END), 0)::numeric AS "verifiedAmount"
         FROM bookings b
-        WHERE b.status != 'cancelled' ${eventFilter}
+        JOIN events e ON e.id = b.event_id
+        WHERE b.status NOT IN ('cancelled', 'pending_payment') ${scopeFilter}
         GROUP BY b.payment_mode
       `),
     ])
@@ -88,6 +139,7 @@ export async function GET(request: Request) {
       { header: 'Collecting Officer', key: 'officerName', width: 26 },
       { header: 'Bookings', key: 'bookingCount', width: 12 },
       { header: 'Total Pax', key: 'totalPax', width: 12 },
+      { header: 'Razorpay (INR)', key: 'razorpayAmount', width: 16 },
       { header: 'Cash (INR)', key: 'cashAmount', width: 16 },
       { header: 'Officer UPI (INR)', key: 'upiAmount', width: 18 },
       { header: 'Pay at Door (INR)', key: 'doorAmount', width: 18 },
@@ -99,6 +151,7 @@ export async function GET(request: Request) {
         officerName: row.officerName,
         bookingCount: Number(row.bookingCount),
         totalPax: Number(row.totalPax),
+        razorpayAmount: Number(row.razorpayAmount),
         cashAmount: Number(row.cashAmount),
         upiAmount: Number(row.upiAmount),
         doorAmount: Number(row.doorAmount),
@@ -156,7 +209,7 @@ export async function GET(request: Request) {
     ledgerSheet.getRow(1).font = { bold: true }
 
     const buffer = await workbook.xlsx.writeBuffer()
-    const fileName = `aiaia-agm-finance-${eventId || 'all'}-${new Date().toISOString().slice(0, 10)}.xlsx`
+    const fileName = `aiaia-agm-finance-${scopeSlug}-${new Date().toISOString().slice(0, 10)}.xlsx`
 
     return new NextResponse(new Uint8Array(buffer as ArrayBuffer), {
       status: 200,

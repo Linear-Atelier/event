@@ -15,6 +15,7 @@ export const TableTypes: CollectionConfig = {
     update: isSuperAdmin,
     delete: isSuperAdmin,
   },
+  versions: false,
   fields: [
     {
       name: 'name',

@@ -26,6 +26,7 @@ export const BookingTickets: CollectionConfig = {
     update: isBookingOfficerOrAdmin,
     delete: isSuperAdmin,
   },
+  versions: false,
   fields: [
     {
       name: 'booking',

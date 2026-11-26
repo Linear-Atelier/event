@@ -13,7 +13,7 @@ export const Members: CollectionConfig = {
     update: isBookingOfficerOrAdmin,
     delete: isSuperAdmin,
   },
-  versions: true,
+  versions: false,
   fields: [
     {
       name: 'memberCode',

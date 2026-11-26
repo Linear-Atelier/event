@@ -8,7 +8,7 @@ interface SyncCheckinItem {
   slotId: number
   checkedInAt: string
   deviceId: string
-  method?: 'qr_scan' | 'manual_code' | 'door_sale'
+  method?: 'qr_scan' | 'manual_code'
 }
 
 export async function POST(request: Request) {
@@ -39,8 +39,7 @@ export async function POST(request: Request) {
 
       const checkedInAt = item.checkedInAt || new Date().toISOString()
       const deviceId = String(item.deviceId || 'GATE-DEVICE').slice(0, 64)
-      const method =
-        item.method === 'manual_code' || item.method === 'door_sale' ? item.method : 'qr_scan'
+      const method = item.method === 'manual_code' ? 'manual_code' : 'qr_scan'
 
       // Atomic idempotent UPDATE: only locks slots where checked_in_at IS NULL
       const res = await db.execute(sql`

@@ -32,6 +32,7 @@ export const Events: CollectionConfig = {
     update: isSuperAdmin,
     delete: isSuperAdmin,
   },
+  versions: false,
   hooks: {
     beforeChange: [
       async ({ data, operation, originalDoc }) => {
@@ -121,7 +122,7 @@ export const Events: CollectionConfig = {
       label: 'Ticket Phases & Pricing',
       admin: {
         description:
-          'Define each pricing phase (e.g. Early-Bird, Phase 1, Door Sales) with optional auto-start/end dates, and select reusable Ticket Types from the dropdown.',
+          'Define each pricing phase (e.g. Early-Bird, Phase 1, Final Phase) with optional auto-start/end dates, and select reusable Ticket Types from the dropdown.',
       },
       fields: [
         {
@@ -132,7 +133,7 @@ export const Events: CollectionConfig = {
               type: 'text',
               required: true,
               admin: {
-                placeholder: 'e.g. Early-Bird, Phase 1, Door Sales / Walk-In',
+                placeholder: 'e.g. Early-Bird, Phase 1, Final Phase / Event Day',
               },
             },
             {

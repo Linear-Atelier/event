@@ -217,7 +217,7 @@ async function seed() {
       ],
     },
     {
-      phaseName: 'Door Sales / Walk-In',
+      phaseName: 'Final Phase / Event Day',
       startsAt: '2026-12-20T00:00:00.000Z',
       overrideStatus: 'auto' as const,
       tickets: [

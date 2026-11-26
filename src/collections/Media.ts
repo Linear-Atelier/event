@@ -9,6 +9,7 @@ export const Media: CollectionConfig = {
     update: isSuperAdmin,
     delete: isSuperAdmin,
   },
+  versions: false,
   fields: [
     {
       name: 'alt',
