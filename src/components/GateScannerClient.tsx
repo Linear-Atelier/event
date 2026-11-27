@@ -1,16 +1,19 @@
 'use client'
 
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import jsQR from 'jsqr'
 import {
   Camera,
   CameraOff,
   CheckCircle2,
+  Loader2,
   Lock,
+  QrCode,
   RefreshCw,
   Search,
   ShieldAlert,
   ShieldCheck,
+  Wallet,
   Wifi,
   WifiOff,
   X,
@@ -22,8 +25,12 @@ import {
   type CachedEvent,
   type CachedSlot,
 } from '@/lib/offline-db'
-import { formatEventDayLabel } from '@/lib/event-date'
-import { parseQRJson, verifyQRSignatureOffline } from '@/lib/qr-verify'
+import { formatEventDayLabel, isScanAllowedForEventDate } from '@/lib/event-date'
+import {
+  parseTicketQR,
+  verifyCompactQRTagOffline,
+  verifyQRSignatureOffline,
+} from '@/lib/qr-verify'
 import type {
   GateSyncWorkerInMessage,
   GateSyncWorkerOutMessage,
@@ -60,8 +67,21 @@ export function GateScannerClient({
   const [selectedEventId, setSelectedEventId] = useState<number>(
     initialEventId || events[0]?.id || 0,
   )
-  const selectedEvent = events.find((e) => e.id === selectedEventId) || null
-  const isScanOpen = selectedEvent?.isScanOpen !== false
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === selectedEventId) || null,
+    [events, selectedEventId],
+  )
+  const isScanOpen = useMemo(
+    () =>
+      selectedEvent
+        ? selectedEvent.isScanOpen !== false && isScanAllowedForEventDate(selectedEvent.date)
+        : false,
+    [selectedEvent],
+  )
+  const scanOpensLabel = useMemo(
+    () => (selectedEvent ? formatEventDayLabel(selectedEvent.date) : 'Event Day'),
+    [selectedEvent],
+  )
   const isOnline = useSyncExternalStore(
     (onStoreChange) => {
       window.addEventListener('online', onStoreChange)
@@ -108,6 +128,13 @@ export function GateScannerClient({
   const [sigStatus, setSigStatus] = useState<'verified' | 'manual' | 'invalid'>('manual')
   const [scanMethod, setScanMethod] = useState<'qr_scan' | 'manual_code'>('manual_code')
   const [savingCheckin, setSavingCheckin] = useState(false)
+  const [doorPaymentMethod, setDoorPaymentMethod] = useState<
+    'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY'
+  >('CASH')
+  const [doorPaymentConfirmed, setDoorPaymentConfirmed] = useState(false)
+  const [doorRzpLink, setDoorRzpLink] = useState<string | null>(null)
+  const [doorRzpLoading, setDoorRzpLoading] = useState(false)
+  const [doorRzpError, setDoorRzpError] = useState<string | null>(null)
 
   // Register Service Worker
   useEffect(() => {
@@ -219,6 +246,10 @@ export function GateScannerClient({
       verification: 'verified' | 'manual' | 'invalid',
       method: 'qr_scan' | 'manual_code',
     ) => {
+      if (!isScanOpen) {
+        setStatusBanner(`Gate check-in opens on ${scanOpensLabel}.`)
+        return
+      }
       const [tickets, rawSlots] = await Promise.all([
         offlineDb.tickets.where('bookingId').equals(booking.id).toArray(),
         offlineDb.slots.where('bookingId').equals(booking.id).toArray(),
@@ -280,19 +311,66 @@ export function GateScannerClient({
       setCheckedSlotIds(preTicked)
       setSigStatus(verification)
       setScanMethod(method)
+      setDoorPaymentMethod('CASH')
+      setDoorPaymentConfirmed(false)
+      setDoorRzpLink(null)
+      setDoorRzpError(null)
     },
-    [setActiveBooking, setCheckedSlotIds],
+    [isScanOpen, scanOpensLabel, setActiveBooking, setCheckedSlotIds],
   )
 
-  // Handle decoded QR string
+  // Handle decoded QR string (supports compact `XMAS26-B012:9F4A2C8B` and legacy JSON)
   const handleQrDecoded = useCallback(
     async (raw: string) => {
-      const parsed = parseQRJson(raw)
-      if (!parsed) {
+      if (!isScanOpen) {
+        setStatusBanner(`Gate check-in opens on ${scanOpensLabel}.`)
+        return
+      }
+      const decoded = parseTicketQR(raw)
+      if (!decoded) {
         setStatusBanner(`Unrecognized QR code: ${raw.slice(0, 40)}`)
         return
       }
 
+      if (decoded.format === 'compact') {
+        const booking = await offlineDb.bookings
+          .where('bookingCode')
+          .equalsIgnoreCase(decoded.code)
+          .first()
+
+        if (!booking) {
+          setStatusBanner(
+            `Booking ${decoded.code} not found in offline cache. Tap Sync first.`,
+          )
+          return
+        }
+
+        if (booking.status === 'cancelled' || booking.status === 'pending_payment') {
+          setStatusBanner(
+            `Booking ${booking.bookingCode} is ${booking.status === 'cancelled' ? 'cancelled' : 'pending payment'} and cannot be checked in.`,
+          )
+          return
+        }
+
+        const ev = await offlineDb.events.get(Number(booking.eventId))
+        let verification: 'verified' | 'manual' | 'invalid' = 'invalid'
+        if (decoded.sigTag && ev?.publicKey) {
+          const ok = await verifyCompactQRTagOffline({
+            sigTag: decoded.sigTag,
+            booking,
+            publicKeyHex: ev.publicKey,
+          })
+          verification = ok ? 'verified' : 'invalid'
+        } else if (!decoded.sigTag) {
+          verification = 'manual'
+        }
+
+        await openBookingChecklist(booking, verification, 'qr_scan')
+        return
+      }
+
+      // Legacy JSON QR fallback
+      const parsed = decoded.payload
       const ev = await offlineDb.events.get(Number(parsed.eId))
       let verification: 'verified' | 'invalid' = 'invalid'
       if (ev?.publicKey) {
@@ -313,7 +391,7 @@ export function GateScannerClient({
 
       await openBookingChecklist(booking, verification, 'qr_scan')
     },
-    [openBookingChecklist],
+    [isScanOpen, openBookingChecklist, scanOpensLabel],
   )
 
   // Camera scanner lifecycle
@@ -353,7 +431,9 @@ export function GateScannerClient({
             if (ctx) {
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-              const code = jsQR(imageData.data, imageData.width, imageData.height)
+              const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: 'attemptBoth',
+              })
               if (code?.data) {
                 stopCamera()
                 handleQrDecoded(code.data)
@@ -442,11 +522,108 @@ export function GateScannerClient({
     }
   }, [lookupQuery, selectedEventId])
 
-  const visibleLookupResults = lookupQuery.trim() ? lookupResults : []
+  const visibleLookupResults = isScanOpen && lookupQuery.trim() ? lookupResults : []
+
+  // Poll Razorpay status while a door Razorpay QR is open in the check-in modal
+  useEffect(() => {
+    if (
+      !activeBooking ||
+      doorPaymentMethod !== 'RAZORPAY' ||
+      !doorRzpLink ||
+      activeBooking.paymentStatus === 'paid'
+    ) {
+      return
+    }
+    let cancelled = false
+    const bookingId = activeBooking.id
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/bookings/${bookingId}/payment-status`, {
+          credentials: 'include',
+        })
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as { paymentStatus?: string }
+        if (cancelled) return
+        if (data.paymentStatus === 'paid') {
+          await offlineDb.bookings.update(bookingId, {
+            paymentMode: 'RAZORPAY',
+            paymentStatus: 'paid',
+          })
+          setActiveBooking((prev) =>
+            prev && prev.id === bookingId
+              ? { ...prev, paymentMode: 'RAZORPAY', paymentStatus: 'paid' }
+              : prev,
+          )
+          setDoorRzpLink(null)
+          setDoorRzpError(null)
+        }
+      } catch {
+        // Ignore transient network errors while polling
+      }
+    }
+
+    const timer = setInterval(() => {
+      void poll()
+    }, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [activeBooking, doorPaymentMethod, doorRzpLink])
+
+  async function handleGenerateDoorRazorpay() {
+    if (!activeBooking || !isOnline) return
+    setDoorRzpLoading(true)
+    setDoorRzpError(null)
+    try {
+      const res = await fetch(`/api/bookings/${activeBooking.id}/door-razorpay`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        alreadyPaid?: boolean
+        paymentLinkUrl?: string
+        error?: string
+      }
+      if (!res.ok) {
+        setDoorRzpError(data.error || 'Could not generate Razorpay QR')
+        return
+      }
+      if (data.alreadyPaid) {
+        await offlineDb.bookings.update(activeBooking.id, {
+          paymentMode: 'RAZORPAY',
+          paymentStatus: 'paid',
+        })
+        setActiveBooking((prev) =>
+          prev ? { ...prev, paymentMode: 'RAZORPAY', paymentStatus: 'paid' } : prev,
+        )
+        return
+      }
+      if (data.paymentLinkUrl) {
+        setDoorRzpLink(data.paymentLinkUrl)
+      }
+    } catch {
+      setDoorRzpError('Network error while generating Razorpay QR')
+    } finally {
+      setDoorRzpLoading(false)
+    }
+  }
 
   // Confirm pre-ticked check-in slots (locks permanently!)
   async function handleConfirmCheckin() {
     if (!activeBooking || !canScan) return
+    if (!isScanOpen) {
+      setStatusBanner(`Gate check-in opens on ${scanOpensLabel}.`)
+      setActiveBooking(null)
+      return
+    }
+    const needsDoorPayment =
+      activeBooking.paymentMode === 'PAY_AT_DOOR' && activeBooking.paymentStatus !== 'paid'
+    if (needsDoorPayment && (doorPaymentMethod === 'RAZORPAY' || !doorPaymentConfirmed)) {
+      return
+    }
+
     const toCheckIn = activeSlots.filter((s) => !s.checkedInAt && checkedSlotIds[s.id])
     if (toCheckIn.length === 0) {
       setActiveBooking(null)
@@ -455,29 +632,54 @@ export function GateScannerClient({
 
     setSavingCheckin(true)
     const nowIso = new Date().toISOString()
+    const offlineDoorMode =
+      needsDoorPayment && doorPaymentMethod !== 'RAZORPAY' ? doorPaymentMethod : undefined
 
     try {
-      await offlineDb.transaction('rw', [offlineDb.slots, offlineDb.pendingSync], async () => {
-        for (const s of toCheckIn) {
-          await offlineDb.slots.update(s.id, {
-            checkedInAt: nowIso,
-            deviceId,
-            method: scanMethod,
-          })
-          await offlineDb.pendingSync.add({
-            slotId: s.id,
-            bookingId: activeBooking.id,
-            checkedInAt: nowIso,
-            deviceId,
-            method: scanMethod,
-            synced: 0,
-          })
-        }
-      })
+      await offlineDb.transaction(
+        'rw',
+        [offlineDb.bookings, offlineDb.slots, offlineDb.pendingSync],
+        async () => {
+          if (offlineDoorMode) {
+            await offlineDb.bookings.update(activeBooking.id, {
+              paymentMode: offlineDoorMode,
+              paymentStatus: 'paid',
+              totalAmount:
+                offlineDoorMode === 'COMPLIMENTARY' ? 0 : activeBooking.totalAmount,
+            })
+          }
+          for (const s of toCheckIn) {
+            await offlineDb.slots.update(s.id, {
+              checkedInAt: nowIso,
+              deviceId,
+              method: scanMethod,
+            })
+            await offlineDb.pendingSync.add({
+              slotId: s.id,
+              bookingId: activeBooking.id,
+              checkedInAt: nowIso,
+              deviceId,
+              method: scanMethod,
+              doorPaymentMode: offlineDoorMode,
+              synced: 0,
+            })
+          }
+        },
+      )
 
       await refreshLocalStats(selectedEventId)
+      const modeText =
+        offlineDoorMode === 'OFFICER_UPI'
+          ? 'Officer UPI'
+          : offlineDoorMode === 'COMPLIMENTARY'
+            ? 'Complimentary'
+            : 'Cash'
       setStatusBanner(
-        `Checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode} (permanently locked).`,
+        offlineDoorMode
+          ? offlineDoorMode === 'COMPLIMENTARY'
+            ? `Marked complimentary (₹0) & checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode}.`
+            : `Collected ₹${activeBooking.totalAmount.toLocaleString('en-IN')} (${modeText}) & checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode}.`
+          : `Checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode} (permanently locked).`,
       )
       setActiveBooking(null)
       setLookupQuery('')
@@ -511,8 +713,10 @@ export function GateScannerClient({
             onChange={(e) => {
               const nextId = Number(e.target.value)
               const nextEv = events.find((ev) => ev.id === nextId)
-              if (nextEv?.isScanOpen === false) {
+              if (nextEv && (nextEv.isScanOpen === false || !isScanAllowedForEventDate(nextEv.date))) {
                 stopCamera()
+                setLookupQuery('')
+                setActiveBooking(null)
               }
               setSelectedEventId(nextId)
             }}
@@ -593,7 +797,12 @@ export function GateScannerClient({
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-black via-black/45 to-transparent" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-24 bg-gradient-to-t from-black via-black/55 to-transparent" />
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="h-52 w-52 rounded-3xl border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
+                <div className="relative h-58 w-58 rounded-3xl shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
+                  <span className="absolute left-0 top-0 h-8 w-8 rounded-tl-3xl border-l-[3px] border-t-[3px] border-white" />
+                  <span className="absolute right-0 top-0 h-8 w-8 rounded-tr-3xl border-r-[3px] border-t-[3px] border-white" />
+                  <span className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-3xl border-b-[3px] border-l-[3px] border-white" />
+                  <span className="absolute bottom-0 right-0 h-8 w-8 rounded-br-3xl border-b-[3px] border-r-[3px] border-white" />
+                </div>
               </div>
               <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center">
                 <button
@@ -650,17 +859,34 @@ export function GateScannerClient({
 
       {/* Offline Manual Lookup (Dark Frosted Glass Sheet at Bottom) */}
       <div className="px-4 py-4 pb-6 text-white">
-        <h2 className="text-sm font-bold text-white">
-          Manual Lookup
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-white">
+            Manual Lookup
+          </h2>
+          {!isScanOpen && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-semibold text-neutral-300">
+              <Lock className="h-3 w-3" />
+              Opens {scanOpensLabel}
+            </span>
+          )}
+        </div>
         <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
+          {isScanOpen ? (
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
+          ) : (
+            <Lock className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-500" />
+          )}
           <input
             type="text"
-            value={lookupQuery}
+            disabled={!isScanOpen}
+            value={isScanOpen ? lookupQuery : ''}
             onChange={(e) => setLookupQuery(e.target.value)}
-            placeholder="Type XMAS26-B001, phone number, or guest name..."
-            className="w-full rounded-2xl border border-white/15 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white placeholder-neutral-400 transition focus:border-white/60 focus:bg-white/15 focus:outline-none"
+            placeholder={
+              isScanOpen
+                ? 'Type XMAS26-B001, phone number, or guest name...'
+                : `Manual check-in opens on ${scanOpensLabel}...`
+            }
+            className="w-full rounded-2xl border border-white/15 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white placeholder-neutral-400 transition focus:border-white/60 focus:bg-white/15 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           />
         </div>
 
@@ -695,9 +921,9 @@ export function GateScannerClient({
 
       {/* PRE-TICKED ATTENDEE CHECKLIST MODAL */}
       {activeBooking && (
-        <div className="fixed inset-0 bottom-20 z-50 flex items-end justify-center bg-neutral-950/70 p-4 sm:items-center">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
-            <div className="flex items-start justify-between">
+        <div className="fixed inset-x-0 bottom-[70px] top-0 z-50 flex items-end justify-center bg-neutral-950/70 p-3 sm:items-center sm:p-4">
+          <div className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex shrink-0 items-start justify-between">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xl font-extrabold text-neutral-900">
@@ -727,7 +953,7 @@ export function GateScannerClient({
               {sigStatus === 'verified' && (
                 <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  Ed25519 QR Signature Verified Offline
+                  QR Signature Verified
                 </div>
               )}
               {sigStatus === 'invalid' && (
@@ -738,8 +964,112 @@ export function GateScannerClient({
               )}
             </div>
 
+            {/* Mandatory Pay-at-Door Collection Step (All /desk payment options) */}
+            {activeBooking.paymentMode === 'PAY_AT_DOOR' &&
+              activeBooking.paymentStatus !== 'paid' && (
+                <div className="mt-3 shrink-0 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                      <Wallet className="h-4 w-4 text-amber-700" />
+                      Payment Due at Door
+                    </div>
+                    <span className="text-sm font-extrabold text-amber-950 tabular-nums">
+                      {doorPaymentMethod === 'COMPLIMENTARY'
+                        ? '₹0'
+                        : `₹${activeBooking.totalAmount.toLocaleString('en-IN')}`}
+                    </span>
+                  </div>
+
+                  <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        { key: 'RAZORPAY', label: isOnline ? 'Razorpay QR' : 'Razorpay (Offline)' },
+                        { key: 'CASH', label: 'Cash' },
+                        { key: 'OFFICER_UPI', label: 'Officer UPI' },
+                        { key: 'COMPLIMENTARY', label: 'Complimentary (₹0)' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        disabled={opt.key === 'RAZORPAY' && !isOnline}
+                        onClick={() => {
+                          setDoorPaymentMethod(opt.key)
+                          setDoorPaymentConfirmed(false)
+                          setDoorRzpError(null)
+                        }}
+                        className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-45 ${doorPaymentMethod === opt.key
+                          ? 'bg-amber-900 text-white shadow-xs'
+                          : 'border border-amber-300 bg-white text-amber-900 hover:bg-amber-100/70'
+                          }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {doorPaymentMethod === 'RAZORPAY' ? (
+                    <div className="mt-2.5 rounded-lg bg-neutral-950 p-3 text-center text-white">
+                      {doorRzpLink ? (
+                        <div className="flex flex-col items-center gap-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={`/api/qr/link?url=${encodeURIComponent(doorRzpLink)}`}
+                            alt="Razorpay Payment QR"
+                            className="h-36 w-36 rounded-xl"
+                          />
+                          <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-300">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>Waiting for Razorpay payment…</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            disabled={doorRzpLoading || !isOnline}
+                            onClick={handleGenerateDoorRazorpay}
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-neutral-200 disabled:opacity-50"
+                          >
+                            {doorRzpLoading ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Generating QR…
+                              </>
+                            ) : (
+                              <>
+                                <QrCode className="h-3.5 w-3.5" />
+                                Generate Razorpay QR · ₹
+                                {activeBooking.totalAmount.toLocaleString('en-IN')}
+                              </>
+                            )}
+                          </button>
+                          {doorRzpError && (
+                            <p className="text-[11px] font-medium text-rose-300">{doorRzpError}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <label className="mt-2.5 flex cursor-pointer items-center gap-2 rounded-lg bg-white/80 px-2.5 py-2 font-semibold text-amber-950 ring-1 ring-amber-200">
+                      <input
+                        type="checkbox"
+                        checked={doorPaymentConfirmed}
+                        onChange={(e) => setDoorPaymentConfirmed(e.target.checked)}
+                        className="h-4 w-4 rounded accent-amber-700"
+                      />
+                      <span>
+                        {doorPaymentMethod === 'COMPLIMENTARY'
+                          ? 'Confirm Complimentary entry (₹0)'
+                          : `Collected ₹${activeBooking.totalAmount.toLocaleString('en-IN')} via ${doorPaymentMethod === 'OFFICER_UPI' ? 'Officer UPI' : 'Cash'}`}
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
+
             {/* Attendee Slots Checklist (Grouped by Ticket; Pre-ticked by default; checked-in slots locked permanently) */}
-            <div className="mt-4 h-[60vh] max-h-[90vh] space-y-3 overflow-y-auto pr-0.5">
+            <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
                 Uncheck absent guests, then confirm check-in:
               </div>
@@ -825,7 +1155,7 @@ export function GateScannerClient({
               ))}
             </div>
 
-            <div className="mt-5 flex gap-2">
+            <div className="mt-4 flex shrink-0 gap-2">
               <button
                 type="button"
                 onClick={() => setActiveBooking(null)}
@@ -837,14 +1167,27 @@ export function GateScannerClient({
                 type="button"
                 disabled={
                   !canScan ||
+                  !isScanOpen ||
                   savingCheckin ||
                   activeBooking.status === 'cancelled' ||
-                  activeSlots.every((s) => Boolean(s.checkedInAt))
+                  activeSlots.every((s) => Boolean(s.checkedInAt)) ||
+                  (activeBooking.paymentMode === 'PAY_AT_DOOR' &&
+                    activeBooking.paymentStatus !== 'paid' &&
+                    (doorPaymentMethod === 'RAZORPAY' || !doorPaymentConfirmed))
                 }
                 onClick={handleConfirmCheckin}
                 className="flex-[2] rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
               >
-                {savingCheckin ? 'Locking Check-In…' : 'Confirm & Lock Check-In'}
+                {savingCheckin
+                  ? 'Locking Check-In…'
+                  : activeBooking.paymentMode === 'PAY_AT_DOOR' &&
+                    activeBooking.paymentStatus !== 'paid'
+                    ? doorPaymentMethod === 'RAZORPAY'
+                      ? 'Awaiting Razorpay…'
+                      : doorPaymentMethod === 'COMPLIMENTARY'
+                        ? 'Mark Complimentary & Check In'
+                        : `Collect ₹${activeBooking.totalAmount.toLocaleString('en-IN')} & Check In`
+                    : 'Confirm & Lock Check-In'}
               </button>
             </div>
           </div>

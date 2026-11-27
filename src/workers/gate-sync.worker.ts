@@ -59,6 +59,7 @@ async function runFullSync(eventId: number, manual: boolean) {
             checkedInAt: p.checkedInAt,
             deviceId: p.deviceId,
             method: p.method,
+            doorPaymentMode: p.doorPaymentMode,
           })),
         }),
       })

@@ -32,11 +32,16 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
       collection: 'bookings',
       user,
       overrideAccess: false,
-      where: { status: { not_in: ['cancelled', 'pending_payment'] } },
+      where: { status: { not_equals: 'pending_payment' } },
       limit: 2000,
       depth: 0,
     }),
   ])
+
+  const getNetAmt = (b: (typeof bookingsRes.docs)[number]) =>
+    b.status === 'cancelled'
+      ? Math.max(0, (Number(b.paidAmount) || 0) - (Number(b.refundAmount) || 0))
+      : b.totalAmount || 0
 
   const now = new Date()
   const currentFy = getFinancialYearForDate(now)
@@ -49,6 +54,7 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
     const evId = typeof b.event === 'object' ? b.event.id : b.event
     return fyEventIds.has(evId)
   })
+  const activeFyBookings = fyBookings.filter((b) => b.status !== 'cancelled')
 
   const cutoffMs = now.getTime() - 24 * 60 * 60 * 1000
   const upcomingEvents = eventsRes.docs.filter((ev) => {
@@ -63,6 +69,7 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
       const evId = typeof b.event === 'object' ? b.event.id : b.event
       return evId === nextEventDoc.id
     })
+    const activeEvBookings = evBookings.filter((b) => b.status !== 'cancelled')
     const evMs = new Date(nextEventDoc.date).getTime()
     nextEvent = {
       id: nextEventDoc.id,
@@ -75,18 +82,18 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
       iconSvg: nextEventDoc.iconSvg || null,
       isPast: !Number.isNaN(evMs) && evMs < cutoffMs,
       isScanOpen: isScanAllowedForEventDate(nextEventDoc.date),
-      bookingCount: evBookings.length,
-      totalPax: evBookings.reduce((sum, b) => sum + (b.totalPax || 0), 0),
-      totalRevenue: evBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0),
+      bookingCount: activeEvBookings.length,
+      totalPax: activeEvBookings.reduce((sum, b) => sum + (b.totalPax || 0), 0),
+      totalRevenue: evBookings.reduce((sum, b) => sum + getNetAmt(b), 0),
     }
   }
 
   return {
     fyCode: currentFy.code,
     eventsCount: fyEventIds.size,
-    totalBookings: fyBookings.length,
-    totalPax: fyBookings.reduce((sum, b) => sum + (b.totalPax || 0), 0),
-    totalRevenue: fyBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0),
+    totalBookings: activeFyBookings.length,
+    totalPax: activeFyBookings.reduce((sum, b) => sum + (b.totalPax || 0), 0),
+    totalRevenue: fyBookings.reduce((sum, b) => sum + getNetAmt(b), 0),
     nextEvent,
   }
 }
@@ -148,6 +155,9 @@ export default async function HomePage() {
             Hello, {firstName}
           </h1>
         </div>
+        {user.roles.includes('super_admin') && (
+          <Link href="/admin" className='inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-200'>Admin Panel</Link>
+        )}
         {/* {nextEvent && (
             <Link
               href={`/events/${nextEvent.id}`}

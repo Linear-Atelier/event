@@ -18,6 +18,11 @@ export async function POST(
 
     const { id } = await context.params
     const bookingId = Number(id)
+    const body = (await request.json().catch(() => ({}))) as {
+      channels?: 'both' | 'email' | 'whatsapp'
+    }
+    const channels: 'both' | 'email' | 'whatsapp' =
+      body.channels === 'email' || body.channels === 'whatsapp' ? body.channels : 'both'
     const payload = await getPayload({ config })
 
     const booking = await payload.findByID({
@@ -82,6 +87,7 @@ export async function POST(
       tablesSummary,
       ticketCodes: ticketsRes.docs.map((t) => t.ticketCode),
       trigger: 'manual_resend',
+      channels,
     })
 
     return NextResponse.json({ success: true, result })

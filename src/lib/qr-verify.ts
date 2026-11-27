@@ -8,6 +8,17 @@ export interface ParsedQRPayload {
   sig: string
 }
 
+export type DecodedTicketQR =
+  | {
+      format: 'compact'
+      code: string
+      sigTag: string | null
+    }
+  | {
+      format: 'legacy_json'
+      payload: ParsedQRPayload
+    }
+
 function hexToBytes(hex: string): Uint8Array {
   const clean = hex.trim()
   const bytes = new Uint8Array(clean.length / 2)
@@ -42,6 +53,41 @@ export function parseQRJson(raw: string): ParsedQRPayload | null {
   }
 }
 
+/**
+ * Parses either the compact uppercase alphanumeric QR format (`XMAS26-B012:9F4A2C8B`
+ * or `XMAS26-B012`) or the legacy signed JSON format for backward compatibility.
+ */
+export function parseTicketQR(raw: string): DecodedTicketQR | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  if (trimmed.startsWith('{')) {
+    const legacy = parseQRJson(trimmed)
+    return legacy ? { format: 'legacy_json', payload: legacy } : null
+  }
+
+  const upper = trimmed.toUpperCase()
+  const compactWithSig = upper.match(/^([0-9A-Z-]+):([0-9A-F]{8})$/)
+  if (compactWithSig) {
+    return {
+      format: 'compact',
+      code: compactWithSig[1],
+      sigTag: compactWithSig[2],
+    }
+  }
+
+  const plainCode = upper.match(/^([0-9A-Z]+-B\d+|B\d+)$/)
+  if (plainCode) {
+    return {
+      format: 'compact',
+      code: plainCode[1],
+      sigTag: null,
+    }
+  }
+
+  return null
+}
+
 export async function verifyQRSignatureOffline(
   payload: ParsedQRPayload,
   publicKeyHex: string,
@@ -60,4 +106,36 @@ export async function verifyQRSignatureOffline(
   } catch {
     return false
   }
+}
+
+/**
+ * Offline verification for compact `CODE:8HEX` QR payloads:
+ * 1. Confirms the 8-character uppercase hex tag matches the cached booking's Ed25519 signature prefix.
+ * 2. Verifies the full cached Ed25519 signature against the event's cached public key.
+ */
+export async function verifyCompactQRTagOffline(params: {
+  sigTag: string
+  booking: {
+    id: number | string
+    bookingCode: string
+    eventId: number | string
+    totalPax: number
+    qrSignature: string
+  }
+  publicKeyHex: string
+}): Promise<boolean> {
+  const expectedTag = (params.booking.qrSignature || '').trim().slice(0, 8).toUpperCase()
+  if (!expectedTag || expectedTag.length < 8) return false
+  if (params.sigTag.trim().toUpperCase() !== expectedTag) return false
+
+  return verifyQRSignatureOffline(
+    {
+      bId: String(params.booking.id),
+      code: params.booking.bookingCode,
+      eId: String(params.booking.eventId),
+      pax: Number(params.booking.totalPax),
+      sig: params.booking.qrSignature,
+    },
+    params.publicKeyHex,
+  )
 }

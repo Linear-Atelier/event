@@ -5,6 +5,7 @@ import {
   isBookingOfficerOrAdmin,
   isSuperAdmin,
 } from '../access/roles'
+import { formatEventDayLabel, isScanAllowedForEventDate } from '../lib/event-date'
 
 export const TicketCheckinSlots: CollectionConfig = {
   slug: 'ticket-checkin-slots',
@@ -19,6 +20,48 @@ export const TicketCheckinSlots: CollectionConfig = {
     delete: isSuperAdmin,
   },
   versions: false,
+  hooks: {
+    beforeChange: [
+      async ({ data, operation, originalDoc, req }) => {
+        if (operation !== 'update' || !data?.checkedInAt || originalDoc?.checkedInAt) {
+          return data
+        }
+        const bookingRef = data.booking ?? originalDoc?.booking
+        const bookingId =
+          typeof bookingRef === 'object' && bookingRef !== null ? bookingRef.id : bookingRef
+        if (!bookingId) return data
+
+        const bookingDoc = await req.payload.findByID({
+          collection: 'bookings',
+          id: bookingId,
+          overrideAccess: true,
+          depth: 1,
+        })
+        if (!bookingDoc) return data
+
+        if (bookingDoc.status === 'cancelled' || bookingDoc.status === 'pending_payment') {
+          throw new Error(`Cannot check in a ${bookingDoc.status} booking.`)
+        }
+
+        const eventObj =
+          typeof bookingDoc.event === 'object' && bookingDoc.event !== null
+            ? bookingDoc.event
+            : await req.payload.findByID({
+                collection: 'events',
+                id: bookingDoc.event,
+                overrideAccess: true,
+                depth: 0,
+              })
+
+        if (eventObj?.date && !isScanAllowedForEventDate(eventObj.date)) {
+          throw new Error(
+            `Gate check-in opens on ${formatEventDayLabel(eventObj.date)}.`,
+          )
+        }
+        return data
+      },
+    ],
+  },
   fields: [
     {
       name: 'booking',

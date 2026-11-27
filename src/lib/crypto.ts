@@ -88,3 +88,27 @@ export function buildSignedQRJson(payload: QRPayloadSigned): string {
     sig: payload.sig,
   })
 }
+
+/**
+ * Compact strictly-uppercase Alphanumeric QR payload (`XMAS26-B012:9F4A2C8B`).
+ * Encodes in QR Alphanumeric mode (20 chars -> Version 1 21x21 at EC level M)
+ * while preserving offline tamper-proofing via the 8-char uppercase hex tag
+ * derived from the booking's Ed25519 signature.
+ */
+export function buildCompactQRPayload(
+  bookingCode: string,
+  qrSignature?: string | null,
+): string {
+  const cleanCode = bookingCode
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-Z\-./]/g, '')
+  const cleanSig = (qrSignature || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-F]/g, '')
+  if (cleanSig.length >= 8) {
+    return `${cleanCode}:${cleanSig.slice(0, 8)}`
+  }
+  return cleanCode
+}

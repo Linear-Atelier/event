@@ -33,7 +33,6 @@ export interface CachedTicket {
   phaseName: string
   typeName: string
   paxCount: number
-  physicalIssued: boolean
 }
 
 export interface CachedSlot {
@@ -56,6 +55,7 @@ export interface PendingSyncItem {
   checkedInAt: string
   deviceId: string
   method: 'qr_scan' | 'manual_code'
+  doorPaymentMode?: 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY'
   synced: number // 0 = pending, 1 = synced
 }
 

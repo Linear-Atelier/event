@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getPayload } from 'payload'
 import config from '@payload-config'
-import { buildSignedQRJson } from '@/lib/crypto'
+import { buildCompactQRPayload } from '@/lib/crypto'
 import { generateStyledQrPng } from '@/lib/qr-image'
 import type { Event } from '@/payload-types'
 
@@ -39,16 +39,9 @@ export async function GET(
       typeof booking.event === 'object' && booking.event !== null
         ? (booking.event as Event)
         : null
-    const eventId = eventObj ? eventObj.id : (booking.event as number)
     const eventName = eventObj?.name || 'AIAIA Cochin Event'
 
-    const qrContent = buildSignedQRJson({
-      bId: booking.id,
-      code: booking.bookingCode,
-      eId: eventId,
-      pax: booking.totalPax,
-      sig: booking.qrSignature || '',
-    })
+    const qrContent = buildCompactQRPayload(booking.bookingCode, booking.qrSignature)
 
     const pngBuffer = await generateStyledQrPng({
       qrContent,

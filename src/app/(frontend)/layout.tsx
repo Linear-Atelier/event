@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import type { Metadata, Viewport } from 'next'
 import { Nunito_Sans } from 'next/font/google'
 import { getServerUser } from '@/lib/auth'
 import { AppNavbar } from '@/components/AppNavbar'
+import { PageNavigationLoader } from '@/components/PageNavigationLoader'
 import './styles.css'
 
 const nunitoSans = Nunito_Sans({
@@ -30,7 +31,10 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
 
   return (
     <html lang="en" className={nunitoSans.variable}>
-      <body className="min-h-screen bg-white font-sans text-neutral-900 antialiased">
+      <body className="min-h-screen bg-neutral-50 font-sans text-neutral-900 antialiased">
+        <Suspense fallback={null}>
+          <PageNavigationLoader />
+        </Suspense>
         {user ? (
           <div className="flex min-h-screen flex-col">
             <AppNavbar user={user} />

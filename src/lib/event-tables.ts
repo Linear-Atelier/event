@@ -3,6 +3,7 @@ export interface VirtualEventTable {
   tableTypeId: string
   tableTypeName: string
   capacity: number
+  price: number
 }
 
 export interface RawEventTableRow {
@@ -18,6 +19,7 @@ export interface RawEventTableRow {
     | null
   quantity?: number | null
   prefixOverride?: string | null
+  price?: number | null
 }
 
 /**
@@ -61,6 +63,7 @@ export function expandEventTables(
     }
 
     const prefix = ((row.prefixOverride || '').trim() || defaultPrefix).replace(/-+$/, '')
+    const price = Math.max(0, Number(row.price) || 0)
 
     for (let i = 0; i < qty; i++) {
       const nextNum = (counterByPrefix.get(prefix) || 0) + 1
@@ -71,6 +74,7 @@ export function expandEventTables(
         tableTypeId: typeId,
         tableTypeName: typeName,
         capacity,
+        price,
       })
     }
   }

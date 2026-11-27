@@ -176,6 +176,7 @@ export async function GET(request: Request) {
           tableLabel: t.tableLabel,
           tableTypeName: t.tableTypeName,
           maxCapacity: t.capacity,
+          price: t.price,
           isReserved: Boolean(reserved),
           reservedByBookingId: reserved?.bookingId ?? null,
           reservedByBookingCode: reserved?.bookingCode ?? null,

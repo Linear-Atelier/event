@@ -43,3 +43,12 @@
 button {
   cursor: pointer
 }
+
+@keyframes pageLoaderSlide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}

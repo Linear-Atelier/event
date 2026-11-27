@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import { sql } from '@payloadcms/db-postgres/drizzle'
 import config from '@payload-config'
-import { getServerUser } from '@/lib/auth'
+import { getServerUser, userHasRole } from '@/lib/auth'
 import { isScanAllowedForEventDate } from '@/lib/event-date'
 import { expandEventTables } from '@/lib/event-tables'
 import {
@@ -93,29 +93,42 @@ export default async function EventDetailPage(props: {
       payload.db.drizzle.execute(sql`
         SELECT
           b.payment_mode AS "paymentMode",
-          COUNT(*)::int AS "bookingCount",
-          COALESCE(SUM(b.total_pax), 0)::int AS "totalPax",
-          COALESCE(SUM(b.total_amount), 0)::numeric AS "totalAmount",
-          COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN b.total_amount ELSE 0 END), 0)::numeric AS "verifiedAmount"
+          COUNT(CASE WHEN b.status != 'cancelled' THEN 1 END)::int AS "bookingCount",
+          COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_pax ELSE 0 END), 0)::int AS "totalPax",
+          COALESCE(SUM(
+            CASE
+              WHEN b.status != 'cancelled' THEN b.total_amount
+              ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0))
+            END
+          ), 0)::numeric AS "totalAmount",
+          COALESCE(SUM(
+            CASE
+              WHEN b.treasurer_verified = true AND b.status != 'cancelled' THEN b.total_amount
+              WHEN b.treasurer_verified = true AND b.status = 'cancelled' THEN GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0))
+              ELSE 0
+            END
+          ), 0)::numeric AS "verifiedAmount"
         FROM bookings b
-        WHERE b.event_id = ${eventId} AND b.status != 'cancelled'
+        WHERE b.event_id = ${eventId}
+          AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0)
         GROUP BY b.payment_mode
         ORDER BY b.payment_mode
       `),
       payload.db.drizzle.execute(sql`
         SELECT
           COALESCE(u.name, 'Unassigned') AS "officerName",
-          COUNT(*)::int AS "bookingCount",
-          COALESCE(SUM(b.total_pax), 0)::int AS "totalPax",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN b.total_amount ELSE 0 END), 0)::numeric AS "cashAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN b.total_amount ELSE 0 END), 0)::numeric AS "upiAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN b.total_amount ELSE 0 END), 0)::numeric AS "doorAmount",
-          COALESCE(SUM(b.total_amount), 0)::numeric AS "totalAmount",
-          COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN b.total_amount ELSE 0 END), 0)::numeric AS "verifiedAmount",
-          COUNT(CASE WHEN b.treasurer_verified IS NOT TRUE THEN 1 END)::int AS "unverifiedCount"
+          COUNT(CASE WHEN b.status != 'cancelled' THEN 1 END)::int AS "bookingCount",
+          COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_pax ELSE 0 END), 0)::int AS "totalPax",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "cashAmount",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "upiAmount",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "doorAmount",
+          COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END), 0)::numeric AS "totalAmount",
+          COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "verifiedAmount",
+          COUNT(CASE WHEN b.status != 'cancelled' AND b.treasurer_verified IS NOT TRUE THEN 1 END)::int AS "unverifiedCount"
         FROM bookings b
         LEFT JOIN users u ON u.id = b.collected_by_officer_id
-        WHERE b.event_id = ${eventId} AND b.status != 'cancelled'
+        WHERE b.event_id = ${eventId}
+          AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0)
         GROUP BY u.id, u.name
         ORDER BY "totalAmount" DESC
       `),
@@ -130,10 +143,10 @@ export default async function EventDetailPage(props: {
     ticketsByBooking.set(bId, arr)
   }
 
-  const tablesByBooking = new Map<number, Array<{ label: string; seats: number }>>()
+  const tablesByBooking = new Map<number, Array<{ label: string; price: number }>>()
   const allocationsByTableLabel = new Map<
     string,
-    Array<{ bookingCode: string; holderName: string; allocatedSeats: number }>
+    Array<{ bookingCode: string; holderName: string }>
   >()
 
   const bookingMap = new Map<number, Booking>()
@@ -147,22 +160,32 @@ export default async function EventDetailPage(props: {
     if (!bObj || bObj.status === 'cancelled') continue
 
     const label = bt.tableLabel
-    const cap = bt.capacity || 8
+    const price = Number(bt.price) || 0
 
     const bList = tablesByBooking.get(bId) || []
-    bList.push({ label, seats: cap })
+    bList.push({ label, price })
     tablesByBooking.set(bId, bList)
 
     const tList = allocationsByTableLabel.get(label) || []
     tList.push({
       bookingCode: bObj.bookingCode,
       holderName: bObj.holderName,
-      allocatedSeats: cap,
     })
     allocationsByTableLabel.set(label, tList)
   }
 
   const checkedInByBooking = new Map<number, number>()
+  const slotsByBooking = new Map<
+    number,
+    Array<{
+      id: number
+      attendeeName: string
+      label: string
+      ticketCode?: string
+      checkedInAt?: string | null
+    }>
+  >()
+  const ticketCodeById = new Map<number, string>(ticketsRes.docs.map((t) => [t.id, t.ticketCode]))
   const recentCheckins: DashboardCheckinRow[] = []
   let activeTotalSlots = 0
   let activeCheckedInSlots = 0
@@ -170,6 +193,17 @@ export default async function EventDetailPage(props: {
   for (const s of slotsRes.docs) {
     const bId = typeof s.booking === 'object' ? s.booking.id : s.booking
     const bObj = bookingMap.get(bId)
+    const tId = typeof s.bookingTicket === 'object' ? s.bookingTicket.id : Number(s.bookingTicket)
+    const slotList = slotsByBooking.get(bId) || []
+    slotList.push({
+      id: s.id,
+      attendeeName: (s.attendeeName || s.label.split(' — ')[0] || '').trim(),
+      label: s.label,
+      ticketCode: ticketCodeById.get(tId),
+      checkedInAt: s.checkedInAt || null,
+    })
+    slotsByBooking.set(bId, slotList)
+
     if (!bObj || bObj.status === 'cancelled') continue
     activeTotalSlots += 1
 
@@ -206,19 +240,41 @@ export default async function EventDetailPage(props: {
       email: b.email,
       totalPax: b.totalPax,
       totalAmount: b.totalAmount,
+      paidAmount:
+        typeof b.paidAmount === 'number'
+          ? b.paidAmount
+          : b.paymentStatus === 'paid'
+            ? b.totalAmount
+            : 0,
+      refundAmount: Number(b.refundAmount) || 0,
+      refundMethod: b.refundMethod || 'NONE',
+      refundReference: b.refundReference || null,
+      notes: b.notes || null,
+      gatewayRefId: b.gatewayRefId || null,
       status: b.status,
       paymentMode: b.paymentMode,
       paymentStatus: b.paymentStatus,
       collectedByName: officer?.name || 'Officer',
       treasurerVerified: Boolean(b.treasurerVerified),
       ticketCodes: bTickets.map((t) => t.ticketCode),
-      physicalIssuedCount: bTickets.filter((t) => t.physicalIssued).length,
+      tickets: bTickets.map((t) => ({
+        id: t.id,
+        ticketCode: t.ticketCode,
+        ticketTypeName: t.ticketTypeName || 'Ticket',
+        paxCount: t.paxCount,
+        paxNames: t.attendeeNames
+          ? t.attendeeNames
+              .split(',')
+              .map((n) => n.trim())
+              .filter(Boolean)
+          : [],
+      })),
+      slots: slotsByBooking.get(b.id) || [],
       totalTicketCount: bTickets.length,
       tablesSummary:
-        bTables.length > 0
-          ? bTables.map((t) => `${t.label} (${t.seats}p)`).join(', ')
-          : 'Unassigned',
-      allocatedSeats: bTables.reduce((s, t) => s + t.seats, 0),
+        bTables.length > 0 ? bTables.map((t) => t.label).join(', ') : 'Unassigned',
+      assignedTableLabels: bTables.map((t) => t.label),
+      assignedTableFee: bTables.reduce((s, t) => s + t.price, 0),
       checkedInPax: checkedInByBooking.get(b.id) || 0,
       createdAt: b.createdAt,
     }
@@ -231,12 +287,13 @@ export default async function EventDetailPage(props: {
       id: idx + 1,
       tableLabel: t.tableLabel,
       tableTypeName: t.tableTypeName,
-      maxCapacity: t.capacity,
-      isShared: false,
-      occupiedSeats: allocs.length > 0 ? t.capacity : 0,
+      price: t.price,
+      isReserved: allocs.length > 0,
       allocations: allocs,
     }
   })
+
+  const canManage = userHasRole(user, ['booking_officer', 'super_admin'])
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6">
@@ -247,6 +304,7 @@ export default async function EventDetailPage(props: {
           name: event.name,
           date: event.date,
           venue: event.venue,
+          color: event.color || 'sky',
           publicKey: event.publicKey,
           isScanOpen: isScanAllowedForEventDate(event.date),
         }}
@@ -257,6 +315,7 @@ export default async function EventDetailPage(props: {
         modeSummary={byModeSql.rows as unknown as DashboardModeSummary[]}
         totalSlots={activeTotalSlots}
         checkedInSlots={activeCheckedInSlots}
+        canManage={canManage}
       />
     </main>
   )

@@ -119,7 +119,6 @@ export async function GET(request: Request) {
         phaseName: t.phaseName || '',
         typeName: t.ticketTypeName || 'Ticket',
         paxCount: t.paxCount,
-        physicalIssued: Boolean(t.physicalIssued),
       })),
       slots: slotsRes.docs.map((s) => {
         const byUser = s.checkedInByUser as User | null

@@ -241,6 +241,15 @@ export const Events: CollectionConfig = {
                 placeholder: 'Optional prefix (e.g. VIP, T)',
               },
             },
+            {
+              name: 'price',
+              type: 'number',
+              defaultValue: 0,
+              min: 0,
+              admin: {
+                description: 'Optional reservation price per table (₹0 = free)',
+              },
+            },
           ],
         },
       ],

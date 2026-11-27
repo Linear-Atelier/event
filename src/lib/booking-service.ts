@@ -316,11 +316,14 @@ export async function createFullBooking(input: CreateBookingInput) {
   const virtualTables = expandEventTables(eventDoc.tables)
   const virtualByLabel = new Map(virtualTables.map((t) => [t.tableLabel, t]))
 
+  let tablesTotal = 0
   if (requestedLabels.length > 0) {
     for (const lbl of requestedLabels) {
-      if (!virtualByLabel.has(lbl)) {
+      const vt = virtualByLabel.get(lbl)
+      if (!vt) {
         throw new Error(`Table "${lbl}" does not exist on this event.`)
       }
+      tablesTotal += Math.max(0, Number(vt.price) || 0)
     }
 
     // Check non-sharing conflict against active bookings for this event
@@ -351,6 +354,10 @@ export async function createFullBooking(input: CreateBookingInput) {
     }
   }
 
+  if (input.paymentMode !== 'COMPLIMENTARY') {
+    totalAmount += tablesTotal
+  }
+
   const bookingCode = await generateNextBookingCode(payload, eventDoc.id, eventDoc.code)
   const isRazorpayPending = input.paymentMode === 'RAZORPAY' && totalAmount > 0
   const paymentExpiresAt = isRazorpayPending
@@ -359,6 +366,7 @@ export async function createFullBooking(input: CreateBookingInput) {
   const effectivePaymentStatus =
     input.paymentStatus ||
     (isRazorpayPending || input.paymentMode === 'PAY_AT_DOOR' ? 'pending' : 'paid')
+  const effectivePaidAmount = effectivePaymentStatus === 'paid' ? totalAmount : 0
 
   // Create Booking respecting user's RBAC
   const booking = await payload.create({
@@ -374,6 +382,7 @@ export async function createFullBooking(input: CreateBookingInput) {
       email: input.email?.trim() || undefined,
       totalPax,
       totalAmount,
+      paidAmount: effectivePaidAmount,
       status: isRazorpayPending ? 'pending_payment' : 'confirmed',
       notes: input.notes?.trim() || undefined,
       paymentMode: input.paymentMode,
@@ -436,7 +445,6 @@ export async function createFullBooking(input: CreateBookingInput) {
           attendeeNames,
           paxCount: paxPerTicket,
           unitPrice,
-          physicalIssued: false,
         },
       })
       createdTickets.push(ticketDoc)
@@ -485,6 +493,7 @@ export async function createFullBooking(input: CreateBookingInput) {
           tableLabel: vt.tableLabel,
           tableTypeName: vt.tableTypeName,
           capacity: vt.capacity,
+          price: input.paymentMode === 'COMPLIMENTARY' ? 0 : vt.price,
           assignedByOfficer: user.id,
           assignedAt: nowIso,
         },

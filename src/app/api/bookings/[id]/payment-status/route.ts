@@ -6,6 +6,8 @@ import {
   cancelRazorpayPaymentLink,
   fetchRazorpayPaymentLink,
   finalizeRazorpayBookingPayment,
+  finalizeRazorpayTableUpgrade,
+  type PendingUpgradeTablesPayload,
 } from '@/lib/razorpay'
 
 export async function GET(
@@ -35,6 +37,36 @@ export async function GET(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 
+    // Check if there is a pending Razorpay table-upgrade payment link
+    const pendingUpgrade = booking.pendingUpgradeTables as PendingUpgradeTablesPayload | null | undefined
+    if (pendingUpgrade?.gatewayRefId) {
+      const rzp = await fetchRazorpayPaymentLink(pendingUpgrade.gatewayRefId).catch(() => null)
+      if (rzp?.status === 'paid') {
+        const { booking: upgraded, tablesSummary } = await finalizeRazorpayTableUpgrade(
+          payload,
+          booking.id,
+          rzp.paymentId,
+        )
+        return NextResponse.json({
+          status: upgraded.status,
+          paymentStatus: upgraded.paymentStatus,
+          bookingCode: upgraded.bookingCode,
+          totalAmount: upgraded.totalAmount,
+          paidAmount: upgraded.paidAmount ?? upgraded.totalAmount,
+          upgradeApplied: true,
+          tablesSummary,
+        })
+      }
+      return NextResponse.json({
+        status: booking.status,
+        paymentStatus: booking.paymentStatus,
+        bookingCode: booking.bookingCode,
+        upgradePending: true,
+        upgradePaymentLinkUrl: pendingUpgrade.paymentLinkUrl,
+        additionalDue: pendingUpgrade.additionalAmount,
+      })
+    }
+
     // Already confirmed & paid
     if (booking.status === 'confirmed' && booking.paymentStatus === 'paid') {
       return NextResponse.json({
@@ -46,8 +78,12 @@ export async function GET(
       })
     }
 
-    // If still pending_payment, actively check Razorpay API (works even on localhost without webhook!)
-    if (booking.status === 'pending_payment') {
+    // If still pending payment (either pending_payment hold or PAY_AT_DOOR with a generated Razorpay link),
+    // actively check Razorpay API (works even on localhost without webhook!)
+    if (
+      booking.status === 'pending_payment' ||
+      (booking.paymentStatus === 'pending' && Boolean(booking.gatewayRefId))
+    ) {
       if (booking.gatewayRefId) {
         const rzp = await fetchRazorpayPaymentLink(booking.gatewayRefId).catch(() => null)
         if (rzp?.status === 'paid') {
@@ -67,8 +103,12 @@ export async function GET(
         }
       }
 
-      // Check 10-minute POS hold expiry
-      if (booking.paymentExpiresAt && Date.now() >= new Date(booking.paymentExpiresAt).getTime()) {
+      // Check 10-minute POS hold expiry (only applies to pending_payment holds, not confirmed PAY_AT_DOOR)
+      if (
+        booking.status === 'pending_payment' &&
+        booking.paymentExpiresAt &&
+        Date.now() >= new Date(booking.paymentExpiresAt).getTime()
+      ) {
         if (booking.gatewayRefId) {
           await cancelRazorpayPaymentLink(booking.gatewayRefId)
         }

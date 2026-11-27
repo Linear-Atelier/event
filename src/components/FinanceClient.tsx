@@ -33,6 +33,9 @@ interface FinanceBooking {
   phone: string
   totalPax: number
   totalAmount: number
+  paidAmount?: number
+  refundAmount?: number
+  refundMethod?: string | null
   paymentMode: string
   paymentStatus: string
   status: string
@@ -42,6 +45,15 @@ interface FinanceBooking {
   transferredAt?: string | null
   receivedAt?: string | null
   createdAt: string
+}
+
+function getNetBookingAmount(b: FinanceBooking): number {
+  if (b.status === 'cancelled') {
+    const paid = typeof b.paidAmount === 'number' ? b.paidAmount : 0
+    const refunded = Number(b.refundAmount) || 0
+    return Math.max(0, paid - refunded)
+  }
+  return b.totalAmount
 }
 
 interface FinanceClientProps {
@@ -105,16 +117,24 @@ export function FinanceClient({
     return ev ? `${ev.code} — ${ev.name} (${ev.fyCode})` : `${currentFyCode} · All Events`
   }, [selectedFyCode, selectedFilter, events, currentFyCode])
 
-  const activeBookings = useMemo(
+  const scopedBookings = useMemo(
     () =>
       bookings.filter((b) => {
-        if (b.status === 'cancelled' || b.status === 'pending_payment') return false
+        if (b.status === 'pending_payment') return false
         if (selectedFyCode) {
           return eventFyById.get(b.eventId) === selectedFyCode
         }
         return String(b.eventId) === selectedFilter
       }),
     [bookings, selectedFyCode, selectedFilter, eventFyById],
+  )
+
+  const activeBookings = useMemo(
+    () =>
+      scopedBookings.filter(
+        (b) => b.status !== 'cancelled' || getNetBookingAmount(b) > 0,
+      ),
+    [scopedBookings],
   )
 
   const filteredBookings = useMemo(() => {
@@ -126,6 +146,8 @@ export function FinanceClient({
 
   const totals = useMemo(() => {
     let gross = 0
+    let refunded = 0
+    let activeCount = 0
     let received = 0
     let transferred = 0
     let withOfficer = 0
@@ -133,22 +155,29 @@ export function FinanceClient({
     let transferredCount = 0
     let receivedCount = 0
 
+    for (const b of scopedBookings) {
+      refunded += Number(b.refundAmount) || 0
+    }
+
     for (const b of activeBookings) {
-      gross += b.totalAmount
+      const amt = getNetBookingAmount(b)
+      if (b.status !== 'cancelled') activeCount += 1
+      gross += amt
       if (b.settlementStatus === 'received_by_treasurer') {
-        received += b.totalAmount
+        received += amt
         receivedCount += 1
       } else if (b.settlementStatus === 'transferred_to_treasurer') {
-        transferred += b.totalAmount
+        transferred += amt
         transferredCount += 1
       } else {
-        withOfficer += b.totalAmount
+        withOfficer += amt
         withOfficerCount += 1
       }
     }
     return {
-      count: activeBookings.length,
+      count: activeCount,
       gross,
+      refunded,
       received,
       transferred,
       withOfficer,
@@ -156,7 +185,7 @@ export function FinanceClient({
       transferredCount,
       receivedCount,
     }
-  }, [activeBookings])
+  }, [activeBookings, scopedBookings])
 
   const officerRows = useMemo(() => {
     const map = new Map<
@@ -189,19 +218,20 @@ export function FinanceClient({
         transferredAmount: 0,
         withOfficerAmount: 0,
       }
-      curr.bookingCount += 1
-      curr.totalAmount += b.totalAmount
-      if (b.paymentMode === 'RAZORPAY') curr.razorpayAmount += b.totalAmount
-      else if (b.paymentMode === 'CASH') curr.cashAmount += b.totalAmount
-      else if (b.paymentMode === 'OFFICER_UPI') curr.upiAmount += b.totalAmount
-      else if (b.paymentMode === 'PAY_AT_DOOR') curr.doorAmount += b.totalAmount
+      const amt = getNetBookingAmount(b)
+      if (b.status !== 'cancelled') curr.bookingCount += 1
+      curr.totalAmount += amt
+      if (b.paymentMode === 'RAZORPAY') curr.razorpayAmount += amt
+      else if (b.paymentMode === 'CASH') curr.cashAmount += amt
+      else if (b.paymentMode === 'OFFICER_UPI') curr.upiAmount += amt
+      else if (b.paymentMode === 'PAY_AT_DOOR') curr.doorAmount += amt
 
       if (b.settlementStatus === 'received_by_treasurer') {
-        curr.receivedAmount += b.totalAmount
+        curr.receivedAmount += amt
       } else if (b.settlementStatus === 'transferred_to_treasurer') {
-        curr.transferredAmount += b.totalAmount
+        curr.transferredAmount += amt
       } else {
-        curr.withOfficerAmount += b.totalAmount
+        curr.withOfficerAmount += amt
       }
 
       map.set(key, curr)
@@ -231,13 +261,16 @@ export function FinanceClient({
         receivedAmount: 0,
         transferredAmount: 0,
       }
-      curr.bookingCount += 1
-      curr.totalPax += b.totalPax
-      curr.totalAmount += b.totalAmount
+      const amt = getNetBookingAmount(b)
+      if (b.status !== 'cancelled') {
+        curr.bookingCount += 1
+        curr.totalPax += b.totalPax
+      }
+      curr.totalAmount += amt
       if (b.settlementStatus === 'received_by_treasurer') {
-        curr.receivedAmount += b.totalAmount
+        curr.receivedAmount += amt
       } else if (b.settlementStatus === 'transferred_to_treasurer') {
-        curr.transferredAmount += b.totalAmount
+        curr.transferredAmount += amt
       }
       map.set(b.paymentMode, curr)
     }
@@ -402,12 +435,15 @@ export function FinanceClient({
       <div className="glass-surface rounded-3xl p-5 text-white shadow-xl">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div>
-            <div className="text-[11px] font-medium text-neutral-300">Gross Revenue</div>
+            <div className="text-[11px] font-medium text-neutral-300">Net Revenue</div>
             <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
               ₹{totals.gross.toLocaleString('en-IN')}
             </div>
             <div className="mt-0.5 text-[11px] text-neutral-400">
-              {totals.count} active bookings
+              {totals.count} active
+              {totals.refunded > 0
+                ? ` · ₹${totals.refunded.toLocaleString('en-IN')} refunded`
+                : ' bookings'}
             </div>
           </div>
 

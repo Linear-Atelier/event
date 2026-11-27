@@ -3,7 +3,9 @@ import { getPayload } from 'payload'
 import config from '@payload-config'
 import {
   finalizeRazorpayBookingPayment,
+  finalizeRazorpayTableUpgrade,
   verifyRazorpayWebhookSignature,
+  type PendingUpgradeTablesPayload,
 } from '@/lib/razorpay'
 
 interface RazorpayWebhookPayload {
@@ -66,6 +68,26 @@ export async function POST(request: Request) {
     }
 
     if (eventType === 'payment_link.paid' || eventType === 'payment.captured') {
+      const bookingDoc = await payload.findByID({
+        collection: 'bookings',
+        id: bookingId,
+        overrideAccess: true,
+        depth: 0,
+      })
+      const pendingUpgrade = bookingDoc?.pendingUpgradeTables as
+        | PendingUpgradeTablesPayload
+        | null
+        | undefined
+      const isTableUpgrade =
+        plinkEntity?.notes?.purpose === 'table_upgrade' ||
+        paymentEntity?.notes?.purpose === 'table_upgrade' ||
+        (Boolean(plinkId) && pendingUpgrade?.gatewayRefId === plinkId)
+
+      if (isTableUpgrade) {
+        await finalizeRazorpayTableUpgrade(payload, bookingId, paymentId)
+        return NextResponse.json({ received: true, action: 'table_upgrade_confirmed', bookingId })
+      }
+
       await finalizeRazorpayBookingPayment(payload, bookingId, paymentId)
       return NextResponse.json({ received: true, action: 'confirmed', bookingId })
     }

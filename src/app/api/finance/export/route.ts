@@ -54,6 +54,8 @@ export async function GET(request: Request) {
     const scopeFilter = eventId
       ? sql`AND b.event_id = ${eventId}`
       : sql`AND e.date >= ${fy.startIso} AND e.date <= ${fy.endIso}`
+    const netExpr = sql`CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END`
+    const revenueWhere = sql`WHERE b.status != 'pending_payment' AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0) ${scopeFilter}`
 
     const [bookingsRes, byOfficerRes, byModeRes] = await Promise.all([
       eventId
@@ -80,31 +82,31 @@ export async function GET(request: Request) {
       db.execute(sql`
         SELECT
           COALESCE(u.name, 'Unassigned') AS "officerName",
-          COUNT(*)::int AS "bookingCount",
-          COALESCE(SUM(b.total_pax), 0)::int AS "totalPax",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'RAZORPAY' THEN b.total_amount ELSE 0 END), 0)::numeric AS "razorpayAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN b.total_amount ELSE 0 END), 0)::numeric AS "cashAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN b.total_amount ELSE 0 END), 0)::numeric AS "upiAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN b.total_amount ELSE 0 END), 0)::numeric AS "doorAmount",
-          COALESCE(SUM(b.total_amount), 0)::numeric AS "totalAmount",
-          COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN b.total_amount ELSE 0 END), 0)::numeric AS "verifiedAmount"
+          COUNT(CASE WHEN b.status != 'cancelled' THEN 1 END)::int AS "bookingCount",
+          COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_pax ELSE 0 END), 0)::int AS "totalPax",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'RAZORPAY' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "razorpayAmount",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "cashAmount",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "upiAmount",
+          COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "doorAmount",
+          COALESCE(SUM(${netExpr}), 0)::numeric AS "totalAmount",
+          COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN ${netExpr} ELSE 0 END), 0)::numeric AS "verifiedAmount"
         FROM bookings b
         JOIN events e ON e.id = b.event_id
         LEFT JOIN users u ON u.id = b.collected_by_officer_id
-        WHERE b.status NOT IN ('cancelled', 'pending_payment') ${scopeFilter}
+        ${revenueWhere}
         GROUP BY u.id, u.name
         ORDER BY "totalAmount" DESC
       `),
       db.execute(sql`
         SELECT
           b.payment_mode AS "paymentMode",
-          COUNT(*)::int AS "bookingCount",
-          COALESCE(SUM(b.total_pax), 0)::int AS "totalPax",
-          COALESCE(SUM(b.total_amount), 0)::numeric AS "totalAmount",
-          COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN b.total_amount ELSE 0 END), 0)::numeric AS "verifiedAmount"
+          COUNT(CASE WHEN b.status != 'cancelled' THEN 1 END)::int AS "bookingCount",
+          COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_pax ELSE 0 END), 0)::int AS "totalPax",
+          COALESCE(SUM(${netExpr}), 0)::numeric AS "totalAmount",
+          COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN ${netExpr} ELSE 0 END), 0)::numeric AS "verifiedAmount"
         FROM bookings b
         JOIN events e ON e.id = b.event_id
-        WHERE b.status NOT IN ('cancelled', 'pending_payment') ${scopeFilter}
+        ${revenueWhere}
         GROUP BY b.payment_mode
       `),
     ])
@@ -170,6 +172,10 @@ export async function GET(request: Request) {
       { header: 'Phone', key: 'phone', width: 16 },
       { header: 'Pax', key: 'totalPax', width: 8 },
       { header: 'Amount (INR)', key: 'totalAmount', width: 15 },
+      { header: 'Paid Amount (INR)', key: 'paidAmount', width: 18 },
+      { header: 'Refund Amount (INR)', key: 'refundAmount', width: 18 },
+      { header: 'Refund Method', key: 'refundMethod', width: 16 },
+      { header: 'Net Retained (INR)', key: 'netRetained', width: 18 },
       { header: 'Payment Mode', key: 'paymentMode', width: 16 },
       { header: 'Payment Status', key: 'paymentStatus', width: 15 },
       { header: 'Status', key: 'status', width: 14 },
@@ -190,6 +196,15 @@ export async function GET(request: Request) {
           : b.settlementStatus === 'transferred_to_treasurer'
             ? 'Transferred (Awaiting Receipt)'
             : 'With Officer'
+      const paidAmt =
+        typeof b.paidAmount === 'number'
+          ? b.paidAmount
+          : b.paymentStatus === 'paid'
+            ? b.totalAmount
+            : 0
+      const refundAmt = Number(b.refundAmount) || 0
+      const netRetained =
+        b.status === 'cancelled' ? Math.max(0, paidAmt - refundAmt) : b.totalAmount
       ledgerSheet.addRow({
         bookingCode: b.bookingCode,
         eventName: ev,
@@ -197,6 +212,10 @@ export async function GET(request: Request) {
         phone: b.phone,
         totalPax: b.totalPax,
         totalAmount: b.totalAmount,
+        paidAmount: paidAmt,
+        refundAmount: refundAmt,
+        refundMethod: b.refundMethod || 'NONE',
+        netRetained,
         paymentMode: b.paymentMode,
         paymentStatus: b.paymentStatus,
         status: b.status,

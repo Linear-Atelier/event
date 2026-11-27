@@ -17,7 +17,6 @@ export const BookingTickets: CollectionConfig = {
       'attendeeNames',
       'paxCount',
       'unitPrice',
-      'physicalIssued',
     ],
   },
   access: {
@@ -77,21 +76,6 @@ export const BookingTickets: CollectionConfig = {
       type: 'number',
       required: true,
       min: 0,
-    },
-    {
-      name: 'physicalIssued',
-      type: 'checkbox',
-      defaultValue: false,
-      index: true,
-    },
-    {
-      name: 'physicalIssuedBy',
-      type: 'relationship',
-      relationTo: 'users',
-    },
-    {
-      name: 'physicalIssuedAt',
-      type: 'date',
     },
   ],
 }

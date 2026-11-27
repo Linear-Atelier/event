@@ -4,6 +4,13 @@ import config from '@payload-config'
 import { getRequestUser, userHasRole } from '@/lib/auth'
 import { expandEventTables } from '@/lib/event-tables'
 import { sendBookingNotifications } from '@/lib/notifications'
+import {
+  cancelRazorpayPaymentLink,
+  createRazorpayPaymentLink,
+  type PendingUpgradeTablesPayload,
+} from '@/lib/razorpay'
+
+type UpgradePaymentMode = 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'PAY_AT_DOOR' | 'COMPLIMENTARY'
 
 export async function POST(
   request: Request,
@@ -30,6 +37,16 @@ export async function POST(
       ),
     )
     const resendNotification = Boolean(body.resendNotification)
+    const channels: 'both' | 'email' | 'whatsapp' =
+      body.channels === 'email' || body.channels === 'whatsapp' ? body.channels : 'both'
+    const paymentMode: UpgradePaymentMode =
+      body.paymentMode === 'RAZORPAY' ||
+      body.paymentMode === 'CASH' ||
+      body.paymentMode === 'OFFICER_UPI' ||
+      body.paymentMode === 'PAY_AT_DOOR' ||
+      body.paymentMode === 'COMPLIMENTARY'
+        ? body.paymentMode
+        : 'CASH'
 
     const payload = await getPayload({ config })
 
@@ -43,6 +60,12 @@ export async function POST(
 
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+    }
+    if (booking.status === 'cancelled') {
+      return NextResponse.json(
+        { error: 'Cannot assign tables to a cancelled booking.' },
+        { status: 400 },
+      )
     }
 
     const eventId = typeof booking.event === 'object' ? booking.event.id : booking.event
@@ -113,7 +136,7 @@ export async function POST(
       }
     }
 
-    // Delete existing table allocations for this booking
+    // Load existing table allocations to compute price delta
     const existing = await payload.find({
       collection: 'booking-tables',
       user,
@@ -123,6 +146,73 @@ export async function POST(
       depth: 0,
     })
 
+    const existingTableFee = existing.docs.reduce(
+      (sum, row) => sum + Math.max(0, Number(row.price) || 0),
+      0,
+    )
+    const newTableFee = requestedLabels.reduce(
+      (sum, lbl) => sum + Math.max(0, Number(virtualByLabel.get(lbl)?.price) || 0),
+      0,
+    )
+    const additionalDue = Math.max(0, newTableFee - existingTableFee)
+
+    // Cancel any previously pending Razorpay table-upgrade link
+    const prevPendingUpgrade = booking.pendingUpgradeTables as
+      | PendingUpgradeTablesPayload
+      | null
+      | undefined
+    if (prevPendingUpgrade?.gatewayRefId) {
+      await cancelRazorpayPaymentLink(prevPendingUpgrade.gatewayRefId)
+    }
+
+    // If additional fee is due via Razorpay, create a Payment Link and hold the upgrade until paid
+    if (additionalDue > 0 && paymentMode === 'RAZORPAY') {
+      const plink = await createRazorpayPaymentLink({
+        bookingId,
+        bookingCode: booking.bookingCode,
+        eventName: eventObj.name,
+        holderName: booking.holderName,
+        phone: booking.phone,
+        email: booking.email,
+        amountInr: additionalDue,
+        totalPax: booking.totalPax,
+        referenceId: `${booking.bookingCode}-T${Date.now().toString().slice(-4)}`,
+        description: `Table Upgrade (${requestedLabels.join(', ')}) · ${booking.bookingCode}`,
+        purpose: 'table_upgrade',
+      })
+
+      const pendingPayload: PendingUpgradeTablesPayload = {
+        labels: requestedLabels,
+        additionalAmount: additionalDue,
+        gatewayRefId: plink.id,
+        paymentLinkUrl: plink.shortUrl,
+        resendNotification,
+        channels,
+        requestedByUserId: user.id,
+      }
+
+      await payload.update({
+        collection: 'bookings',
+        id: bookingId,
+        user,
+        overrideAccess: false,
+        data: {
+          pendingUpgradeTables: pendingPayload as unknown as Record<string, unknown>,
+        },
+      })
+
+      return NextResponse.json({
+        success: true,
+        status: 'awaiting_payment',
+        paymentLinkUrl: plink.shortUrl,
+        gatewayRefId: plink.id,
+        additionalDue,
+        existingTableFee,
+        newTableFee,
+      })
+    }
+
+    // Otherwise apply tables immediately
     for (const row of existing.docs) {
       await payload.delete({
         collection: 'booking-tables',
@@ -132,7 +222,6 @@ export async function POST(
       })
     }
 
-    // Insert new non-sharing table allocations
     const nowIso = new Date().toISOString()
     const tableLabels: string[] = []
     for (const lbl of requestedLabels) {
@@ -146,6 +235,7 @@ export async function POST(
           tableLabel: vt.tableLabel,
           tableTypeName: vt.tableTypeName,
           capacity: vt.capacity,
+          price: paymentMode === 'COMPLIMENTARY' ? 0 : vt.price,
           assignedByOfficer: user.id,
           assignedAt: nowIso,
         },
@@ -154,6 +244,47 @@ export async function POST(
     }
 
     const tablesSummary = tableLabels.length > 0 ? tableLabels.join(', ') : 'Unassigned'
+
+    // Update booking totals / payment tracking if there was an additional table fee or stale pending upgrade
+    let updatedTotalAmount = booking.totalAmount
+    const prevPaidAmount =
+      typeof booking.paidAmount === 'number'
+        ? booking.paidAmount
+        : booking.paymentStatus === 'paid'
+          ? booking.totalAmount
+          : 0
+    let updatedPaidAmount = prevPaidAmount
+
+    if (additionalDue > 0 || prevPendingUpgrade) {
+      const chargeAmount = paymentMode === 'COMPLIMENTARY' ? 0 : additionalDue
+      updatedTotalAmount = booking.totalAmount + chargeAmount
+      if (chargeAmount > 0 && paymentMode !== 'PAY_AT_DOOR') {
+        updatedPaidAmount = prevPaidAmount + chargeAmount
+      }
+
+      const upgradeNote =
+        additionalDue > 0
+          ? `[Table fee ${paymentMode === 'COMPLIMENTARY' ? 'waived' : `+₹${additionalDue.toLocaleString('en-IN')} via ${paymentMode}`} by ${user.name || user.email}]`
+          : ''
+
+      await payload.update({
+        collection: 'bookings',
+        id: bookingId,
+        user,
+        overrideAccess: false,
+        data: {
+          totalAmount: updatedTotalAmount,
+          paidAmount: updatedPaidAmount,
+          pendingUpgradeTables: null,
+          ...(additionalDue > 0 && paymentMode === 'PAY_AT_DOOR'
+            ? { paymentStatus: 'pending', paymentMode: 'PAY_AT_DOOR' }
+            : {}),
+          ...(upgradeNote
+            ? { notes: booking.notes ? `${booking.notes}\n${upgradeNote}` : upgradeNote }
+            : {}),
+        },
+      })
+    }
 
     let notificationResult = null
     if (resendNotification) {
@@ -177,17 +308,22 @@ export async function POST(
         phone: booking.phone,
         email: booking.email,
         totalPax: booking.totalPax,
-        totalAmount: booking.totalAmount,
+        totalAmount: updatedTotalAmount,
         tablesSummary,
         ticketCodes: ticketsRes.docs.map((t) => t.ticketCode),
         trigger: 'table_updated',
+        channels,
       })
     }
 
     return NextResponse.json({
       success: true,
+      status: 'applied',
       tablesSummary,
       assignedTableLabels: requestedLabels,
+      additionalDue,
+      totalAmount: updatedTotalAmount,
+      paidAmount: updatedPaidAmount,
       notificationResult,
     })
   } catch (err) {

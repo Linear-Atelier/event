@@ -1,5 +1,5 @@
 import type { Payload } from 'payload'
-import { buildSignedQRJson } from '@/lib/crypto'
+import { buildCompactQRPayload } from '@/lib/crypto'
 import { generateStyledQrPng } from '@/lib/qr-image'
 
 export type NotificationTrigger =
@@ -24,6 +24,7 @@ export interface SendBookingNotificationInput {
   tablesSummary: string
   ticketCodes: string[]
   trigger: NotificationTrigger
+  channels?: 'both' | 'email' | 'whatsapp'
 }
 
 function getAppBaseUrl(): string {
@@ -222,7 +223,7 @@ export async function sendBookingNotifications(
   emailError?: string
 }> {
   const baseUrl = getAppBaseUrl()
-  const qrPngUrl = `${baseUrl}/api/qr/${encodeURIComponent(input.bookingCode)}.png?style=square&v=3`
+  const qrPngUrl = `${baseUrl}/api/qr/${encodeURIComponent(input.bookingCode)}.png?style=square&v=5`
   const formattedDate = input.eventDate
     ? new Date(input.eventDate).toLocaleString('en-IN', {
         weekday: 'short',
@@ -241,36 +242,52 @@ export async function sendBookingNotifications(
     emailError?: string
   } = { whatsapp: 'skipped', email: 'skipped' }
 
+  const sendWhatsApp = !input.channels || input.channels === 'both' || input.channels === 'whatsapp'
+  const sendEmail = !input.channels || input.channels === 'both' || input.channels === 'email'
+
   // 1. WhatsApp Business Cloud API (Utility Template)
   const waToken = process.env.WHATSAPP_ACCESS_TOKEN
   const waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID
 
-  if (waToken && waPhoneId && input.phone) {
+  if (!sendWhatsApp) {
+    results.whatsapp = 'skipped'
+  } else if (waToken && waPhoneId && input.phone) {
     try {
-      // Generate the styled QR PNG buffer and upload directly to Meta Media API
-      const bookingDoc = await input.payload.findByID({
-        collection: 'bookings',
-        id: input.bookingId,
-        overrideAccess: true,
-        depth: 0,
-      })
+      // Generate the full dark ticket pass PNG buffer and upload directly to Meta Media API
+      const [bookingDoc, ticketsRes] = await Promise.all([
+        input.payload.findByID({
+          collection: 'bookings',
+          id: input.bookingId,
+          overrideAccess: true,
+          depth: 0,
+        }),
+        input.payload.find({
+          collection: 'booking-tickets',
+          overrideAccess: true,
+          where: { booking: { equals: input.bookingId } },
+          sort: 'ticketCode',
+          limit: 50,
+          depth: 0,
+        }),
+      ])
 
-      const eventId =
-        typeof bookingDoc.event === 'object' ? bookingDoc.event.id : bookingDoc.event
-
-      const qrContent = buildSignedQRJson({
-        bId: bookingDoc.id,
-        code: bookingDoc.bookingCode,
-        eId: eventId,
-        pax: bookingDoc.totalPax,
-        sig: bookingDoc.qrSignature || '',
-      })
+      const qrContent = buildCompactQRPayload(bookingDoc.bookingCode, bookingDoc.qrSignature)
 
       const pngBuffer = await generateStyledQrPng({
         qrContent,
         eventName: input.eventName,
         bookingCode: input.bookingCode,
-        style: 'square',
+        style: 'card',
+        holderName: input.holderName,
+        totalPax: input.totalPax,
+        totalAmount: input.totalAmount,
+        tablesSummary: input.tablesSummary,
+        tickets: ticketsRes.docs.map((t) => ({
+          ticketCode: t.ticketCode,
+          ticketTypeName: t.ticketTypeName || undefined,
+          paxNames: t.attendeeNames || undefined,
+          paxCount: t.paxCount,
+        })),
       })
 
       const uploadRes = await uploadWhatsAppMedia(
@@ -371,7 +388,9 @@ export async function sendBookingNotifications(
 
   // 2. Plunk Email Fallback (hosted PNG URL for QR card, never inline base64)
   const plunkKey = process.env.PLUNK_API_KEY
-  if (plunkKey && input.email) {
+  if (!sendEmail) {
+    results.email = 'skipped'
+  } else if (plunkKey && input.email) {
     try {
       const subject =
         input.trigger === 'table_updated'

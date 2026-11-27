@@ -84,6 +84,14 @@ export default async function FinancePage(props: {
               phone: b.phone,
               totalPax: b.totalPax,
               totalAmount: b.totalAmount,
+              paidAmount:
+                typeof b.paidAmount === 'number'
+                  ? b.paidAmount
+                  : b.paymentStatus === 'paid'
+                    ? b.totalAmount
+                    : 0,
+              refundAmount: Number(b.refundAmount) || 0,
+              refundMethod: b.refundMethod || 'NONE',
               paymentMode: b.paymentMode,
               paymentStatus: b.paymentStatus,
               status: b.status,

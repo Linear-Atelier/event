@@ -355,6 +355,10 @@ export interface Event {
          */
         quantity: number;
         prefixOverride?: string | null;
+        /**
+         * Optional reservation price per table (₹0 = free)
+         */
+        price?: number | null;
         id?: string | null;
       }[]
     | null;
@@ -441,6 +445,27 @@ export interface Booking {
   email?: string | null;
   totalPax: number;
   totalAmount: number;
+  /**
+   * Actual amount collected prior to any cancellation/refund.
+   */
+  paidAmount?: number | null;
+  refundAmount?: number | null;
+  refundMethod?: ('NONE' | 'RAZORPAY_API' | 'OFFLINE_CASH' | 'OFFLINE_UPI') | null;
+  /**
+   * Razorpay rfnd_... ID or offline refund note.
+   */
+  refundReference?: string | null;
+  refundedAt?: string | null;
+  refundedBy?: (number | null) | User;
+  pendingUpgradeTables?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
   status: 'confirmed' | 'pending_payment' | 'cancelled' | 'transferred';
   notes?: string | null;
   qrSignature?: string | null;
@@ -489,9 +514,6 @@ export interface BookingTicket {
   attendeeNames?: string | null;
   paxCount: number;
   unitPrice: number;
-  physicalIssued?: boolean | null;
-  physicalIssuedBy?: (number | null) | User;
-  physicalIssuedAt?: string | null;
   createdBy?: {
     relationTo: 'users';
     value: number | User;
@@ -513,6 +535,7 @@ export interface BookingTable {
   tableLabel: string;
   tableTypeName: string;
   capacity: number;
+  price?: number | null;
   assignedByOfficer?: (number | null) | User;
   assignedAt?: string | null;
   createdBy?: {
@@ -834,6 +857,7 @@ export interface EventsSelect<T extends boolean = true> {
         tableType?: T;
         quantity?: T;
         prefixOverride?: T;
+        price?: T;
         id?: T;
       };
   publicKey?: T;
@@ -882,6 +906,13 @@ export interface BookingsSelect<T extends boolean = true> {
   email?: T;
   totalPax?: T;
   totalAmount?: T;
+  paidAmount?: T;
+  refundAmount?: T;
+  refundMethod?: T;
+  refundReference?: T;
+  refundedAt?: T;
+  refundedBy?: T;
+  pendingUpgradeTables?: T;
   status?: T;
   notes?: T;
   qrSignature?: T;
@@ -917,9 +948,6 @@ export interface BookingTicketsSelect<T extends boolean = true> {
   attendeeNames?: T;
   paxCount?: T;
   unitPrice?: T;
-  physicalIssued?: T;
-  physicalIssuedBy?: T;
-  physicalIssuedAt?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -934,6 +962,7 @@ export interface BookingTablesSelect<T extends boolean = true> {
   tableLabel?: T;
   tableTypeName?: T;
   capacity?: T;
+  price?: T;
   assignedByOfficer?: T;
   assignedAt?: T;
   createdBy?: T;

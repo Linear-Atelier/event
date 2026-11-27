@@ -5,7 +5,7 @@ export const BookingTables: CollectionConfig = {
   slug: 'booking-tables',
   admin: {
     useAsTitle: 'tableLabel',
-    defaultColumns: ['booking', 'tableLabel', 'tableTypeName', 'capacity', 'assignedByOfficer', 'assignedAt'],
+    defaultColumns: ['booking', 'tableLabel', 'tableTypeName', 'capacity', 'price', 'assignedByOfficer', 'assignedAt'],
   },
   access: {
     read: isAuthenticated,
@@ -40,6 +40,12 @@ export const BookingTables: CollectionConfig = {
       required: true,
       defaultValue: 8,
       min: 1,
+    },
+    {
+      name: 'price',
+      type: 'number',
+      defaultValue: 0,
+      min: 0,
     },
     {
       name: 'assignedByOfficer',

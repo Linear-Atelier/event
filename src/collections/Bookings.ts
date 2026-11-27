@@ -107,6 +107,88 @@ export const Bookings: CollectionConfig = {
       },
     },
     {
+      name: 'paidAmount',
+      type: 'number',
+      min: 0,
+      admin: {
+        description: 'Actual amount collected prior to any cancellation/refund.',
+      },
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'refundAmount',
+      type: 'number',
+      defaultValue: 0,
+      min: 0,
+      admin: {
+        position: 'sidebar',
+      },
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'refundMethod',
+      type: 'select',
+      defaultValue: 'NONE',
+      options: [
+        { label: 'None', value: 'NONE' },
+        { label: 'Razorpay API', value: 'RAZORPAY_API' },
+        { label: 'Offline — Cash', value: 'OFFLINE_CASH' },
+        { label: 'Offline — UPI / Bank', value: 'OFFLINE_UPI' },
+      ],
+      admin: {
+        position: 'sidebar',
+      },
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'refundReference',
+      type: 'text',
+      admin: {
+        position: 'sidebar',
+        description: 'Razorpay rfnd_... ID or offline refund note.',
+      },
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'refundedAt',
+      type: 'date',
+      admin: {
+        position: 'sidebar',
+      },
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'refundedBy',
+      type: 'relationship',
+      relationTo: 'users',
+      admin: {
+        position: 'sidebar',
+      },
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
+      name: 'pendingUpgradeTables',
+      type: 'json',
+      admin: {
+        hidden: true,
+      },
+      access: {
+        update: fieldBookingOfficerOrAdminUpdate,
+      },
+    },
+    {
       name: 'status',
       type: 'select',
       required: true,
