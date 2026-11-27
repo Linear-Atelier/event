@@ -1,5 +1,47 @@
+import fs from 'fs'
+import path from 'path'
 import QRCode from 'qrcode'
-import sharp from 'sharp'
+
+let fontconfigInitialized = false
+let sharpPromise: Promise<typeof import('sharp')> | null = null
+
+function ensureFontconfig(): void {
+  if (fontconfigInitialized) return
+  fontconfigInitialized = true
+
+  const candidateDirs = [
+    path.join(process.cwd(), 'fonts'),
+    path.resolve(process.cwd(), '..', 'fonts'),
+  ]
+
+  for (const dir of candidateDirs) {
+    const confPath = path.join(dir, 'fonts.conf')
+    if (fs.existsSync(confPath)) {
+      if (!process.env.FONTCONFIG_PATH || !fs.existsSync(process.env.FONTCONFIG_PATH)) {
+        process.env.FONTCONFIG_PATH = dir
+      }
+      if (!process.env.FONTCONFIG_FILE || !fs.existsSync(process.env.FONTCONFIG_FILE)) {
+        process.env.FONTCONFIG_FILE = confPath
+      }
+      try {
+        fs.mkdirSync('/tmp/fontconfig-cache', { recursive: true })
+      } catch {
+        // Ignore if /tmp is unavailable on non-POSIX hosts
+      }
+      break
+    }
+  }
+}
+
+async function getSharp() {
+  ensureFontconfig()
+  if (!sharpPromise) {
+    sharpPromise = import('sharp')
+  }
+  const mod = await sharpPromise
+  return mod.default
+}
+
 
 function escapeXml(str: string): string {
   return str
@@ -282,5 +324,6 @@ export async function generateStyledQrPng(params: {
             tickets: params.tickets,
           })
 
+  const sharp = await getSharp()
   return sharp(Buffer.from(svg)).png().toBuffer()
 }

@@ -357,7 +357,9 @@ export async function sendBookingNotifications(
         }
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'WhatsApp send failed'
       results.whatsapp = 'failed'
+      results.whatsappError = errMsg
       await input.payload.create({
         collection: 'notification-logs',
         overrideAccess: true,
@@ -366,7 +368,7 @@ export async function sendBookingNotifications(
           channel: 'whatsapp',
           trigger: input.trigger,
           status: 'failed',
-          errorMessage: err instanceof Error ? err.message : 'WhatsApp send failed',
+          errorMessage: errMsg,
           sentAt: new Date().toISOString(),
         },
       })
