@@ -5,9 +5,9 @@
   "start_url": "/scan",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
+  "background_color": "#171717",
   "theme_color": "#171717",
-  "orientation": "portrait-primary",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "/AIAIA Logo.png",
