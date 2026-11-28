@@ -514,7 +514,7 @@ export function EventDashboardClient({
 
                       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-600">
                         <span className="truncate font-mono text-xs font-semibold text-neutral-700">
-                          Ticket Codes:
+                          Ticket IDs:
                           <div className='flex flex-col'>
                             {b.ticketCodes.map((code) => (
                               <span key={code} className="font-bold">{code}</span>

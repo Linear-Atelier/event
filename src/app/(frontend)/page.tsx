@@ -132,7 +132,7 @@ export default async function HomePage() {
   ]
 
   return (
-    <main className="mx-auto w-full max-w-2xl space-y-6 px-4 py-5 sm:px-6">
+    <main className="mx-auto w-full max-w-2xl space-y-6 px-4 py-5 sm:px-6 pb-24">
       {/* Next Upcoming Event */}
       <section aria-label="Next Upcoming Event">
         <div className="mb-2.5 flex items-center justify-between gap-2">
