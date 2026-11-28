@@ -61,34 +61,34 @@ export default async function EventDetailPage(props: {
     await Promise.all([
       bookingIds.length > 0
         ? payload.find({
-            collection: 'booking-tickets',
-            user,
-            overrideAccess: false,
-            where: { booking: { in: bookingIds } },
-            limit: 5000,
-            depth: 0,
-          })
+          collection: 'booking-tickets',
+          user,
+          overrideAccess: false,
+          where: { booking: { in: bookingIds } },
+          limit: 5000,
+          depth: 0,
+        })
         : Promise.resolve({ docs: [] }),
       bookingIds.length > 0
         ? payload.find({
-            collection: 'booking-tables',
-            user,
-            overrideAccess: false,
-            where: { booking: { in: bookingIds } },
-            sort: 'tableLabel',
-            limit: 5000,
-            depth: 0,
-          })
+          collection: 'booking-tables',
+          user,
+          overrideAccess: false,
+          where: { booking: { in: bookingIds } },
+          sort: 'tableLabel',
+          limit: 5000,
+          depth: 0,
+        })
         : Promise.resolve({ docs: [] }),
       bookingIds.length > 0
         ? payload.find({
-            collection: 'ticket-checkin-slots',
-            user,
-            overrideAccess: false,
-            where: { booking: { in: bookingIds } },
-            limit: 10000,
-            depth: 1,
-          })
+          collection: 'ticket-checkin-slots',
+          user,
+          overrideAccess: false,
+          where: { booking: { in: bookingIds } },
+          limit: 10000,
+          depth: 1,
+        })
         : Promise.resolve({ docs: [] }),
       payload.db.drizzle.execute(sql`
         SELECT
@@ -110,6 +110,9 @@ export default async function EventDetailPage(props: {
           ), 0)::numeric AS "verifiedAmount"
         FROM bookings b
         WHERE b.event_id = ${eventId}
+          AND b.status NOT IN ('pending_payment', 'pay_at_door')
+          AND b.payment_status != 'pending'
+          AND b.payment_mode IS NOT NULL
           AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0)
         GROUP BY b.payment_mode
         ORDER BY b.payment_mode
@@ -121,13 +124,14 @@ export default async function EventDetailPage(props: {
           COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_pax ELSE 0 END), 0)::int AS "totalPax",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "cashAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "upiAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "doorAmount",
           COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END), 0)::numeric AS "totalAmount",
           COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END ELSE 0 END), 0)::numeric AS "verifiedAmount",
           COUNT(CASE WHEN b.status != 'cancelled' AND b.treasurer_verified IS NOT TRUE THEN 1 END)::int AS "unverifiedCount"
         FROM bookings b
         LEFT JOIN users u ON u.id = b.collected_by_officer_id
         WHERE b.event_id = ${eventId}
+          AND b.status NOT IN ('pending_payment', 'pay_at_door')
+          AND b.payment_status != 'pending'
           AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0)
         GROUP BY u.id, u.name
         ORDER BY "totalAmount" DESC
@@ -252,7 +256,7 @@ export default async function EventDetailPage(props: {
       notes: b.notes || null,
       gatewayRefId: b.gatewayRefId || null,
       status: b.status,
-      paymentMode: b.paymentMode,
+      paymentMode: b.paymentMode || null,
       paymentStatus: b.paymentStatus,
       collectedByName: officer?.name || 'Officer',
       treasurerVerified: Boolean(b.treasurerVerified),
@@ -264,9 +268,9 @@ export default async function EventDetailPage(props: {
         paxCount: t.paxCount,
         paxNames: t.attendeeNames
           ? t.attendeeNames
-              .split(',')
-              .map((n) => n.trim())
-              .filter(Boolean)
+            .split(',')
+            .map((n) => n.trim())
+            .filter(Boolean)
           : [],
       })),
       slots: slotsByBooking.get(b.id) || [],
@@ -296,7 +300,7 @@ export default async function EventDetailPage(props: {
   const canManage = userHasRole(user, ['booking_officer', 'super_admin'])
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+    <main className="mx-auto w-full max-w-2xl px-4 py-5 sm:px-6 lg:max-w-5xl pb-24">
       <EventDashboardClient
         event={{
           id: event.id,

@@ -39,8 +39,8 @@ export default async function GateScanPage(props: {
   const canScan = userHasRole(user, ['gate_staff', 'booking_officer', 'super_admin'])
 
   return (
-    <div className='bg-neutral-950 w-full min-h-screen fixed'>
-      <main className="mx-auto w-full max-w-5xl">
+    <div className="min-h-[calc(100dvh-4rem)] w-full bg-neutral-950 text-white">
+      <main className="mx-auto w-full max-w-2xl">
         <GateScannerClient
           events={eventsRes.docs.map((e) => ({
             id: e.id,
@@ -54,7 +54,6 @@ export default async function GateScanPage(props: {
           canScan={canScan}
         />
       </main>
-
     </div>
   )
 }

@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   Check,
-  CheckCircle2,
   Clock,
   Copy,
   ExternalLink,
@@ -12,13 +11,26 @@ import {
   Minus,
   Plus,
   Search,
-  Send,
   Ticket,
   UserCheck,
   Users,
   X,
 } from 'lucide-react'
+import { EventSelectorBar } from '@/components/EventSelectorBar'
 import { ResendPassModal, type ResendChannel } from '@/components/ResendPassModal'
+import { TicketPassModal } from '@/components/TicketPassModal'
+import {
+  Button,
+  Card,
+  FieldLabel,
+  ModalShell,
+  PageHeader,
+  StatusBadge,
+  TextArea,
+  TextInput,
+  buttonClasses,
+  type BadgeTone,
+} from '@/components/ui/primitives'
 
 interface EventOption {
   id: number
@@ -87,6 +99,12 @@ function formatTicketDisplayName(name: string): string {
   return stripped || name
 }
 
+function subsBadgeTone(status?: string | null): BadgeTone {
+  if (status === 'active') return 'emerald'
+  if (status === 'arrears') return 'amber'
+  return 'rose'
+}
+
 interface BookingDeskClientProps {
   events: EventOption[]
   initialEventId: number | null
@@ -106,13 +124,13 @@ export function BookingDeskClient({
   const [bookedAttendees, setBookedAttendees] = useState<BookedAttendee[]>([])
   const [loadingMeta, setLoadingMeta] = useState(false)
 
-  // Primary Holder member lookup (combined with Holder Full Name field)
+  // Primary Holder member lookup
   const [holderFocused, setHolderFocused] = useState(false)
   const [memberResults, setMemberResults] = useState<MemberResult[]>([])
   const [selectedMember, setSelectedMember] = useState<MemberResult | null>(null)
   const [searchingMembers, setSearchingMembers] = useState(false)
 
-  // Holder info (auto-prefilled from the first attendee unless manually edited)
+  // Holder info
   const [holderName, setHolderName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -124,18 +142,17 @@ export function BookingDeskClient({
   >('RAZORPAY')
   const [notes, setNotes] = useState('')
 
-  // Ticket quantities: phaseId -> qty
+  // Ticket quantities & pax details
   const [quantities, setQuantities] = useState<Record<string, number>>({})
-  // Per-ticket, per-pax attendee details: `${phaseId}-${ticketIdx}-${paxIdx}` -> PaxDetailEntry
   const [paxDetails, setPaxDetails] = useState<Record<string, PaxDetailEntry>>({})
   const [activePaxKey, setActivePaxKey] = useState<string | null>(null)
   const [paxMemberResults, setPaxMemberResults] = useState<MemberResult[]>([])
   const [searchingPax, setSearchingPax] = useState(false)
 
-  // Non-sharing table selections: selected tableLabels (e.g. ['T-01', 'T-02'])
+  // Table selections
   const [selectedTables, setSelectedTables] = useState<string[]>([])
 
-  // Submission state
+  // Submission & modals
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<{
@@ -150,6 +167,7 @@ export function BookingDeskClient({
     tickets: Array<{
       id: number
       ticketCode: string
+      ticketTypeName?: string
       paxCount: number
       paxNames?: string[]
     }>
@@ -174,12 +192,11 @@ export function BookingDeskClient({
     tickets: Array<{
       id: number
       ticketCode: string
+      ticketTypeName?: string
       paxCount: number
       paxNames?: string[]
     }>
   } | null>(null)
-
-  const [copiedCode, setCopiedCode] = useState<string | null>(null)
 
   const loadEventMeta = useCallback(async (eventId: number) => {
     if (!eventId) return
@@ -207,7 +224,7 @@ export function BookingDeskClient({
     return () => clearTimeout(timer)
   }, [selectedEventId, loadEventMeta])
 
-  // Debounced member search directly on Holder Full Name input
+  // Debounced member search on Holder Name
   useEffect(() => {
     const q = holderName.trim()
     if (!holderFocused || selectedMember || q.length < 2) return
@@ -234,9 +251,7 @@ export function BookingDeskClient({
   }, [holderName, holderFocused, selectedMember])
 
   const visibleMemberResults =
-    holderFocused && !selectedMember && holderName.trim().length >= 2
-      ? memberResults
-      : []
+    holderFocused && !selectedMember && holderName.trim().length >= 2 ? memberResults : []
 
   function selectMember(m: MemberResult) {
     setSelectedMember(m)
@@ -302,10 +317,10 @@ export function BookingDeskClient({
     const nonMemberItems = phases.filter((p) => !p.memberOnly)
     const groups: Array<{ key: 'member' | 'non_member'; title: string; items: PhaseOption[] }> = []
     if (memberItems.length > 0) {
-      groups.push({ key: 'member', title: 'Member', items: memberItems })
+      groups.push({ key: 'member', title: 'Member Tickets', items: memberItems })
     }
     if (nonMemberItems.length > 0) {
-      groups.push({ key: 'non_member', title: 'Non-Member', items: nonMemberItems })
+      groups.push({ key: 'non_member', title: 'Non-Member / Guest Tickets', items: nonMemberItems })
     }
     return groups
   }, [phases])
@@ -408,7 +423,7 @@ export function BookingDeskClient({
       }
     }, [expandedTicketGroups, getPaxEntry, bookedByMemberId, bookedByNormalizedName])
 
-  // Debounced inline member lookup for the active pax input
+  // Debounced inline member lookup for active pax input
   const activePaxQuery = activePaxKey ? getPaxEntry(activePaxKey).name.trim() : ''
   const activePaxHasLinkedMember = activePaxKey
     ? Boolean(getPaxEntry(activePaxKey).memberId)
@@ -456,7 +471,6 @@ export function BookingDeskClient({
       },
     }))
 
-    // Auto-prefill Booking Contact from first attendee (or if contact fields are still untouched/empty)
     if (key === firstPaxKey || (!holderTouched && !holderName.trim())) {
       if (!holderTouched) {
         setHolderName(m.fullName)
@@ -571,7 +585,7 @@ export function BookingDeskClient({
           const requiresMember = Boolean(p.memberOnly)
           if (requiresMember && !entry.memberId) {
             setError(
-              `${p.ticketTypeName} is Member-Only — please select a registered member for every attendee on Ticket #${tIdx + 1}.`,
+              `${p.ticketTypeName} is Member-Only — please select a registered member for every guest on Ticket #${tIdx + 1}.`,
             )
             return
           }
@@ -591,7 +605,7 @@ export function BookingDeskClient({
     }
 
     if (ticketLines.length === 0) {
-      setError('Select at least 1 ticket.')
+      setError('Please add at least 1 ticket.')
       return
     }
 
@@ -609,7 +623,8 @@ export function BookingDeskClient({
           holderName,
           phone,
           email: email || null,
-          paymentMode,
+          payAtDoor: paymentMode === 'PAY_AT_DOOR',
+          paymentMode: paymentMode === 'PAY_AT_DOOR' ? null : paymentMode,
           notes,
           tickets: ticketLines,
           tables: tableLines,
@@ -684,7 +699,7 @@ export function BookingDeskClient({
         })
       }
 
-      // Reset form for next fast booking
+      // Reset form for next booking
       setSelectedMember(null)
       setHolderName('')
       setPhone('')
@@ -706,704 +721,677 @@ export function BookingDeskClient({
     }
   }
 
-  async function handleCopyCode(code: string) {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopiedCode(code)
-      setTimeout(() => {
-        setCopiedCode((prev) => (prev === code ? null : prev))
-      }, 1500)
-    } catch {
-      window.prompt('Copy Ticket ID:', code)
-    }
-  }
+  const activeEventName =
+    events.find((e) => e.id === selectedEventId)?.name || 'Event'
+
+  const paymentOptions = [
+    { key: 'RAZORPAY', label: 'Razorpay QR' },
+    { key: 'CASH', label: 'Cash' },
+    { key: 'OFFICER_UPI', label: 'Officer UPI' },
+    { key: 'PAY_AT_DOOR', label: 'Pay at Door' },
+    { key: 'COMPLIMENTARY', label: 'Complimentary (₹0)' },
+  ] as const
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div className="flex w-full items-center gap-2">
-          <select
-            value={selectedEventId}
-            onChange={(e) => setSelectedEventId(Number(e.target.value))}
-            className="flex-1 rounded-full border border-neutral-300 bg-white px-4 py-2 text-lg font-semibold text-neutral-800"
-          >
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id}>
-                {ev.name} — {ev.code}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+    <div className="space-y-5">
+      {/* <PageHeader
+        title="Book Tickets"
+        subtitle="Add tickets, enter guest names, pick tables if needed, and confirm payment."
+      /> */}
+
+      <EventSelectorBar
+        events={events}
+        value={selectedEventId}
+        onChange={setSelectedEventId}
+        label="Select Event"
+      />
 
       {!canCreate && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900">
-          You are viewing the Booking Desk in read-only mode. Creating bookings requires the{' '}
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-950">
+          You are viewing Booking Desk in read-only mode. Creating bookings requires the{' '}
           <strong>booking_officer</strong> or <strong>super_admin</strong> role.
         </div>
       )}
 
-      <form onSubmit={handleCreateBooking} className="grid gap-6 pb-20 lg:grid-cols-5 lg:pb-0">
-          {/* Left columns: Tickets & Tables */}
-          <div className="space-y-6 lg:col-span-3">
-            {error && (
-              <div className="rounded-lg border border-rose-300 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-800">
-                {error}
-              </div>
-            )}
+      {error && (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3.5 text-sm font-semibold text-rose-900">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-700" />
+          <span>{error}</span>
+        </div>
+      )}
 
-            {/* 1. Select Tickets + Inline Member/Guest Entry */}
-            <div className="py-1">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900">
-                  <Ticket className="h-4 w-4 text-zinc-700" />
-                  1. Select Tickets
-                </h2>
-                {defaultPhaseName && (
-                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
-                    {defaultPhaseName}
-                  </span>
-                )}
-              </div>
+      <form onSubmit={handleCreateBooking} className="grid gap-5 lg:grid-cols-5">
+        {/* Left Columns: Step 1 (Tickets) & Step 2 (Tables) */}
+        <div className="space-y-5 lg:col-span-3">
+          {/* STEP 1: SELECT TICKETS */}
+          {/* <Card> */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-lg font-extrabold text-neutral-950">
+              <Ticket className="h-5 w-5 text-neutral-700" />
+              1. Select Tickets
+            </h2>
+            {defaultPhaseName && <StatusBadge tone="neutral">{defaultPhaseName}</StatusBadge>}
+          </div>
 
-              {loadingMeta ? (
-                <p className="mt-3 text-xs text-zinc-500">Loading tickets…</p>
-              ) : groupedTicketPhases.length === 0 ? (
-                <p className="mt-3 text-xs text-amber-700">
-                  No active ticket phases configured for this event.
-                </p>
-              ) : (
-                <div className="mt-4 space-y-5">
-                  {groupedTicketPhases.map((group) => (
-                    <div key={group.key}>
-                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                        {group.title}
-                      </h3>
+          {loadingMeta ? (
+            <p className="mt-4 text-sm font-medium text-neutral-600">Loading tickets…</p>
+          ) : groupedTicketPhases.length === 0 ? (
+            <p className="mt-4 text-sm font-semibold text-amber-800">
+              No active ticket phases configured for this event.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-5">
+              {groupedTicketPhases.map((group) => (
+                <div key={group.key}>
+                  <h3 className="mb-2.5 text-xs font-bold uppercase tracking-wider text-neutral-600">
+                    {group.title}
+                  </h3>
 
-                      <div className="divide-y divide-zinc-100 rounded-2xl border border-zinc-200">
-                        {group.items.map((p) => {
-                          const qty = quantities[p.id] || 0
-                          const displayName = formatTicketDisplayName(p.ticketTypeName)
-                          const showRowPhase =
-                            Boolean(defaultPhaseName) && p.phaseName !== defaultPhaseName
-                          const lineSubtotal = qty * p.price
+                  <div className="divide-y divide-neutral-200 overflow-hidden rounded-2xl border border-neutral-200">
+                    {group.items.map((p) => {
+                      const qty = quantities[p.id] || 0
+                      const displayName = formatTicketDisplayName(p.ticketTypeName)
+                      const showRowPhase =
+                        Boolean(defaultPhaseName) && p.phaseName !== defaultPhaseName
+                      const lineSubtotal = qty * p.price
 
-                          return (
-                            <div
-                              key={p.id}
-                              className={`px-4 py-3.5 transition first:rounded-t-2xl last:rounded-b-2xl ${qty > 0
-                                ? 'bg-zinc-50/80 shadow-[inset_3px_0_0_0_#18181b]'
-                                : 'bg-white'
-                                }`}
-                            >
-                              {/* Compact 2-Column Row: Left Info / Right Unified Stepper */}
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    <span className="text-[15px] font-semibold leading-snug text-zinc-900">
-                                      {displayName}
-                                    </span>
-                                    <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500">
-                                      {p.paxMultiplier} pax
-                                    </span>
-                                    {showRowPhase && (
-                                      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
-                                        {p.phaseName}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="mt-0.5 flex items-baseline gap-1.5 tabular-nums">
-                                    <span className="text-sm font-semibold text-zinc-900">
-                                      ₹{p.price.toLocaleString('en-IN')}
-                                    </span>
-                                    {qty > 1 && (
-                                      <span className="text-xs font-medium text-zinc-500">
-                                        · ₹{lineSubtotal.toLocaleString('en-IN')}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* Unified h-9 Stepper (Right-Anchored) */}
-                                <div className="shrink-0">
-                                  {qty === 0 ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => adjustQty(p.id, 1)}
-                                      aria-label={`Add ${p.ticketTypeName} ticket`}
-                                      className="inline-flex h-9 items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100 active:scale-[0.98]"
-                                    >
-                                      <Plus className="h-3.5 w-3.5" />
-                                      <span>Add</span>
-                                    </button>
-                                  ) : (
-                                    <div className="inline-flex h-9 items-center rounded-xl bg-zinc-900 text-white shadow-xs">
-                                      <button
-                                        type="button"
-                                        onClick={() => adjustQty(p.id, -1)}
-                                        aria-label={`Decrease ${p.ticketTypeName} tickets`}
-                                        className="flex h-9 w-9 items-center justify-center rounded-l-xl transition hover:bg-zinc-800 active:bg-zinc-700"
-                                      >
-                                        <Minus className="h-3.5 w-3.5" />
-                                      </button>
-                                      <span className="min-w-[2ch] px-1 text-center text-sm font-bold tabular-nums">
-                                        {qty}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => adjustQty(p.id, 1)}
-                                        aria-label={`Increase ${p.ticketTypeName} tickets`}
-                                        className="flex h-9 w-9 items-center justify-center rounded-r-xl transition hover:bg-zinc-800 active:bg-zinc-700"
-                                      >
-                                        <Plus className="h-3.5 w-3.5" />
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
+                      return (
+                        <div
+                          key={p.id}
+                          className={`p-4 transition ${qty > 0
+                            ? 'bg-neutral-50 shadow-[inset_4px_0_0_0_#0a0a0a]'
+                            : 'bg-white'
+                            }`}
+                        >
+                          {/* Ticket Info + 48px Touch Stepper */}
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-base font-extrabold text-neutral-950">
+                                  {displayName}
+                                </span>
+                                <StatusBadge tone="neutral">
+                                  {p.paxMultiplier} {p.paxMultiplier === 1 ? 'guest' : 'guests'}
+                                </StatusBadge>
+                                {showRowPhase && (
+                                  <StatusBadge tone="neutral">{p.phaseName}</StatusBadge>
+                                )}
                               </div>
+                              <div className="mt-1 flex items-baseline gap-2 tabular-nums">
+                                <span className="text-base font-bold text-neutral-900">
+                                  ₹{p.price.toLocaleString('en-IN')}
+                                </span>
+                                {qty > 1 && (
+                                  <span className="text-sm font-semibold text-neutral-600">
+                                    · Subtotal ₹{lineSubtotal.toLocaleString('en-IN')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
 
-                              {/* Inline Member / Guest Inputs inside this selected Ticket */}
-                              {qty > 0 && (
-                                <div className="mt-3.5 space-y-3 border-t border-dashed border-neutral-200 pt-3">
-                                  {Array.from({ length: qty }).map((_, tIdx) => (
-                                    <div
-                                      key={`${p.id}-inst-${tIdx}`}
-                                      className="border-b border-neutral-200 pb-4 last:border-b-0 last:pb-0"
-                                    >
-                                      {qty > 1 && (
-                                        <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
-                                          {p.ticketTypeName} #{tIdx + 1}
-                                        </div>
-                                      )}
-
-                                      <div className="grid gap-2.5 sm:grid-cols-2">
-                                        {Array.from({ length: p.paxMultiplier }).map((__, pIdx) => {
-                                          const paxKey = `${p.id}-${tIdx}-${pIdx}`
-                                          const entry = getPaxEntry(paxKey)
-                                          const isFocused = activePaxKey === paxKey
-                                          const dupError = slotDuplicateErrors.get(paxKey)
-                                          const requiresMember = Boolean(p.memberOnly)
-                                          const label = requiresMember
-                                            ? p.paxMultiplier > 1
-                                              ? pIdx === 0
-                                                ? 'Member (Pax 1) *'
-                                                : `Member Spouse / Partner (Pax ${pIdx + 1}) *`
-                                              : 'Member *'
-                                            : p.paxMultiplier > 1
-                                              ? `Guest ${pIdx + 1} Name *`
-                                              : 'Guest Name *'
-
-                                          return (
-                                            <div key={paxKey} className="relative">
-                                              <div className="mb-1 flex items-center justify-between gap-2">
-                                                <label className="text-[11px] font-semibold text-neutral-700">
-                                                  {label}
-                                                </label>
-                                                {!requiresMember && entry.memberId && (
-                                                  <span
-                                                    className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${entry.subsStatus === 'active'
-                                                      ? 'bg-emerald-100 text-emerald-800'
-                                                      : entry.subsStatus === 'arrears'
-                                                        ? 'bg-amber-100 text-amber-800'
-                                                        : 'bg-rose-100 text-rose-800'
-                                                      }`}
-                                                  >
-                                                    {entry.memberCode} · {entry.subsStatus}
-                                                  </span>
-                                                )}
-                                              </div>
-
-                                              {/* Locked Member Chip when a Member is selected on a Member-Only slot */}
-                                              {requiresMember && entry.memberId ? (
-                                                <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2">
-                                                  <div className="min-w-0">
-                                                    <div className="truncate text-xs font-bold text-neutral-900">
-                                                      {entry.name}
-                                                    </div>
-                                                    <div className="flex items-center gap-1.5 text-[10px] font-semibold">
-                                                      <span className="text-neutral-500">
-                                                        {entry.memberCode}
-                                                      </span>
-                                                      <span
-                                                        className={`rounded-full px-1.5 py-0.2 uppercase ${entry.subsStatus === 'active'
-                                                          ? 'bg-emerald-100 text-emerald-800'
-                                                          : entry.subsStatus === 'arrears'
-                                                            ? 'bg-amber-100 text-amber-800'
-                                                            : 'bg-rose-100 text-rose-800'
-                                                          }`}
-                                                      >
-                                                        {entry.subsStatus}
-                                                      </span>
-                                                    </div>
-                                                  </div>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => clearPaxMemberLink(paxKey, true)}
-                                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-neutral-500 shadow-xs hover:text-rose-600"
-                                                    title="Change member"
-                                                  >
-                                                    <X className="h-3.5 w-3.5" />
-                                                  </button>
-                                                </div>
-                                              ) : (
-                                                <>
-                                                  <div className="relative">
-                                                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
-                                                    <input
-                                                      type="text"
-                                                      required
-                                                      value={entry.name}
-                                                      onFocus={() => setActivePaxKey(paxKey)}
-                                                      onBlur={() =>
-                                                        setTimeout(
-                                                          () =>
-                                                            setActivePaxKey((curr) =>
-                                                              curr === paxKey ? null : curr,
-                                                            ),
-                                                          180,
-                                                        )
-                                                      }
-                                                      onChange={(e) =>
-                                                        updatePaxName(paxKey, e.target.value)
-                                                      }
-                                                      placeholder={
-                                                        requiresMember
-                                                          ? 'Search & pick member (name, phone, ID)…'
-                                                          : 'Type guest name or search member…'
-                                                      }
-                                                      className={`w-full rounded-xl border bg-white py-2 pl-8 pr-8 text-xs focus:border-neutral-900 focus:outline-none ${dupError
-                                                        ? 'border-rose-400 bg-rose-50/40'
-                                                        : requiresMember && !entry.memberId
-                                                          ? 'border-amber-300 bg-amber-50/30'
-                                                          : !entry.name.trim()
-                                                            ? 'border-amber-300'
-                                                            : 'border-neutral-300'
-                                                        }`}
-                                                    />
-                                                    {entry.memberId && !requiresMember && (
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => clearPaxMemberLink(paxKey, false)}
-                                                        className="absolute right-2 top-2 text-neutral-400 hover:text-rose-600"
-                                                        title="Unlink member"
-                                                      >
-                                                        <X className="h-3.5 w-3.5" />
-                                                      </button>
-                                                    )}
-                                                    {isFocused && searchingPax && (
-                                                      <span className="absolute right-2.5 top-2 text-[10px] text-neutral-400">
-                                                        …
-                                                      </span>
-                                                    )}
-                                                  </div>
-
-                                                  {dupError && (
-                                                    <p className="mt-1 text-[10px] font-semibold text-rose-600">
-                                                      {dupError}
-                                                    </p>
-                                                  )}
-
-                                                  {!dupError &&
-                                                    requiresMember &&
-                                                    entry.name.trim().length > 0 &&
-                                                    !entry.memberId && (
-                                                      <p className="mt-1 text-[10px] font-semibold text-amber-700">
-                                                        Tap a member from the list below to select
-                                                      </p>
-                                                    )}
-
-                                                  {isFocused &&
-                                                    !entry.memberId &&
-                                                    visiblePaxMemberResults.length > 0 && (
-                                                      <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
-                                                        {visiblePaxMemberResults.map((m) => {
-                                                          const bookedCode = bookedByMemberId.get(m.id)
-                                                          const usedElsewhereInForm = expandedTicketGroups.some((g) =>
-                                                            g.paxKeys.some(
-                                                              (k) => k !== paxKey && getPaxEntry(k).memberId === m.id,
-                                                            ),
-                                                          )
-                                                          const subsBlocked = requiresMember && m.subsStatus !== 'active'
-                                                          const canSelect =
-                                                            !subsBlocked && !bookedCode && !usedElsewhereInForm
-                                                          const blockedReason = bookedCode
-                                                            ? `Booked on ${bookedCode}`
-                                                            : usedElsewhereInForm
-                                                              ? 'Already selected'
-                                                              : subsBlocked
-                                                                ? 'Active subs required'
-                                                                : null
-
-                                                          return (
-                                                            <button
-                                                              key={m.id}
-                                                              type="button"
-                                                              disabled={!canSelect}
-                                                              onMouseDown={(e) => {
-                                                                e.preventDefault()
-                                                                if (canSelect) selectPaxMember(paxKey, m, requiresMember)
-                                                              }}
-                                                              className={`flex w-full items-center justify-between border-b border-neutral-100 px-3 py-2 text-left text-xs ${canSelect
-                                                                ? 'hover:bg-neutral-100'
-                                                                : 'cursor-not-allowed bg-neutral-50/70 opacity-60'
-                                                                }`}
-                                                            >
-                                                              <div>
-                                                                <div className="font-semibold text-neutral-900">
-                                                                  {m.fullName} ({m.memberCode})
-                                                                </div>
-                                                                <div className="text-[10px] text-neutral-500">
-                                                                  {m.phone}
-                                                                  {blockedReason && (
-                                                                    <span className="ml-1.5 font-semibold text-rose-600">
-                                                                      · {blockedReason}
-                                                                    </span>
-                                                                  )}
-                                                                </div>
-                                                              </div>
-                                                              <span
-                                                                className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
-                                                                  ? 'bg-emerald-100 text-emerald-800'
-                                                                  : m.subsStatus === 'arrears'
-                                                                    ? 'bg-amber-100 text-amber-800'
-                                                                    : 'bg-rose-100 text-rose-800'
-                                                                  }`}
-                                                              >
-                                                                {m.subsStatus}
-                                                              </span>
-                                                            </button>
-                                                          )
-                                                        })}
-                                                      </div>
-                                                    )}
-                                                </>
-                                              )}
-                                            </div>
-                                          )
-                                        })}
-                                      </div>
-                                    </div>
-                                  ))}
+                            <div className="shrink-0">
+                              {qty === 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => adjustQty(p.id, 1)}
+                                  aria-label={`Add ${p.ticketTypeName} ticket`}
+                                  className="inline-flex h-12 items-center gap-1.5 rounded-xl border border-neutral-300 bg-white px-4 text-base font-bold text-neutral-950 transition hover:bg-neutral-100 active:bg-neutral-200"
+                                >
+                                  <Plus className="h-5 w-5" />
+                                  <span>Add</span>
+                                </button>
+                              ) : (
+                                <div className="inline-flex h-12 items-center rounded-xl bg-neutral-900 text-white">
+                                  <button
+                                    type="button"
+                                    onClick={() => adjustQty(p.id, -1)}
+                                    aria-label={`Decrease ${p.ticketTypeName} tickets`}
+                                    className="flex h-12 w-12 items-center justify-center rounded-l-xl transition hover:bg-neutral-800 active:bg-neutral-700"
+                                  >
+                                    <Minus className="h-5 w-5" />
+                                  </button>
+                                  <span className="min-w-[2.5ch] px-1 text-center text-lg font-extrabold tabular-nums">
+                                    {qty}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => adjustQty(p.id, 1)}
+                                    aria-label={`Increase ${p.ticketTypeName} tickets`}
+                                    className="flex h-12 w-12 items-center justify-center rounded-r-xl transition hover:bg-neutral-800 active:bg-neutral-700"
+                                  >
+                                    <Plus className="h-5 w-5" />
+                                  </button>
                                 </div>
                               )}
                             </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                          </div>
+
+                          {/* Inline Guest / Member Inputs */}
+                          {qty > 0 && (
+                            <div className="mt-4 space-y-4 border-t border-dashed border-neutral-300 pt-4">
+                              {Array.from({ length: qty }).map((_, tIdx) => (
+                                <div
+                                  key={`${p.id}-inst-${tIdx}`}
+                                  className="border-b border-neutral-200 pb-4 last:border-b-0 last:pb-0"
+                                >
+                                  {qty > 1 && (
+                                    <div className="mb-2 text-xs font-bold uppercase tracking-wider text-neutral-600">
+                                      {p.ticketTypeName} #{tIdx + 1}
+                                    </div>
+                                  )}
+
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    {Array.from({ length: p.paxMultiplier }).map((__, pIdx) => {
+                                      const paxKey = `${p.id}-${tIdx}-${pIdx}`
+                                      const entry = getPaxEntry(paxKey)
+                                      const isFocused = activePaxKey === paxKey
+                                      const dupError = slotDuplicateErrors.get(paxKey)
+                                      const requiresMember = Boolean(p.memberOnly)
+                                      const label = requiresMember
+                                        ? p.paxMultiplier > 1
+                                          ? pIdx === 0
+                                            ? 'Member (Guest 1) *'
+                                            : `Spouse / Partner (Guest ${pIdx + 1}) *`
+                                          : 'Member *'
+                                        : p.paxMultiplier > 1
+                                          ? `Guest ${pIdx + 1} Name *`
+                                          : 'Guest Name *'
+
+                                      return (
+                                        <div key={paxKey} className="relative">
+                                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                                            <label className="text-sm font-bold text-neutral-800">
+                                              {label}
+                                            </label>
+                                            {!requiresMember && entry.memberId && (
+                                              <StatusBadge tone={subsBadgeTone(entry.subsStatus)}>
+                                                {entry.memberCode} · {entry.subsStatus}
+                                              </StatusBadge>
+                                            )}
+                                          </div>
+
+                                          {requiresMember && entry.memberId ? (
+                                            <div className="flex min-h-12 items-center justify-between gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2">
+                                              <div className="min-w-0">
+                                                <div className="truncate text-base font-bold text-neutral-950">
+                                                  {entry.name}
+                                                </div>
+                                                <div className="mt-0.5 flex items-center gap-2 text-xs font-bold">
+                                                  <span className="text-neutral-700">
+                                                    {entry.memberCode}
+                                                  </span>
+                                                  <StatusBadge
+                                                    tone={subsBadgeTone(entry.subsStatus)}
+                                                  >
+                                                    {entry.subsStatus}
+                                                  </StatusBadge>
+                                                </div>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => clearPaxMemberLink(paxKey, true)}
+                                                aria-label="Change member"
+                                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-700 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                                              >
+                                                <X className="h-5 w-5" />
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <>
+                                              <div className="relative">
+                                                <Search className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-neutral-500" />
+                                                <TextInput
+                                                  type="text"
+                                                  required
+                                                  value={entry.name}
+                                                  onFocus={() => setActivePaxKey(paxKey)}
+                                                  onBlur={() =>
+                                                    setTimeout(
+                                                      () =>
+                                                        setActivePaxKey((curr) =>
+                                                          curr === paxKey ? null : curr,
+                                                        ),
+                                                      180,
+                                                    )
+                                                  }
+                                                  onChange={(e) =>
+                                                    updatePaxName(paxKey, e.target.value)
+                                                  }
+                                                  placeholder={
+                                                    requiresMember
+                                                      ? 'Search member name or phone…'
+                                                      : 'Enter guest name or search member…'
+                                                  }
+                                                  className={`pl-11 pr-11 ${dupError
+                                                    ? 'border-rose-400 bg-rose-50'
+                                                    : requiresMember && !entry.memberId
+                                                      ? 'border-amber-400 bg-amber-50/40'
+                                                      : !entry.name.trim()
+                                                        ? 'border-amber-400'
+                                                        : ''
+                                                    }`}
+                                                />
+                                                {entry.memberId && !requiresMember && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      clearPaxMemberLink(paxKey, false)
+                                                    }
+                                                    aria-label="Unlink member"
+                                                    className="absolute right-1.5 top-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-600 hover:bg-neutral-100 hover:text-rose-700"
+                                                  >
+                                                    <X className="h-4 w-4" />
+                                                  </button>
+                                                )}
+                                                {isFocused && searchingPax && (
+                                                  <Loader2 className="absolute right-3.5 top-3.5 h-5 w-5 animate-spin text-neutral-500" />
+                                                )}
+                                              </div>
+
+                                              {dupError && (
+                                                <p className="mt-1.5 text-sm font-bold text-rose-700">
+                                                  {dupError}
+                                                </p>
+                                              )}
+
+                                              {!dupError &&
+                                                requiresMember &&
+                                                entry.name.trim().length > 0 &&
+                                                !entry.memberId && (
+                                                  <p className="mt-1.5 text-sm font-semibold text-amber-800">
+                                                    Tap a member from the list below to select
+                                                  </p>
+                                                )}
+
+                                              {isFocused &&
+                                                !entry.memberId &&
+                                                visiblePaxMemberResults.length > 0 && (
+                                                  <div className="absolute z-30 mt-1.5 max-h-60 w-full overflow-y-auto rounded-xl border border-neutral-300 bg-white shadow-xl">
+                                                    {visiblePaxMemberResults.map((m) => {
+                                                      const bookedCode = bookedByMemberId.get(
+                                                        m.id,
+                                                      )
+                                                      const usedElsewhereInForm =
+                                                        expandedTicketGroups.some((g) =>
+                                                          g.paxKeys.some(
+                                                            (k) =>
+                                                              k !== paxKey &&
+                                                              getPaxEntry(k).memberId === m.id,
+                                                          ),
+                                                        )
+                                                      const subsBlocked =
+                                                        requiresMember &&
+                                                        m.subsStatus !== 'active'
+                                                      const canSelect =
+                                                        !subsBlocked &&
+                                                        !bookedCode &&
+                                                        !usedElsewhereInForm
+                                                      const blockedReason = bookedCode
+                                                        ? `Booked on ${bookedCode}`
+                                                        : usedElsewhereInForm
+                                                          ? 'Already selected'
+                                                          : subsBlocked
+                                                            ? 'Active subs required'
+                                                            : null
+
+                                                      return (
+                                                        <button
+                                                          key={m.id}
+                                                          type="button"
+                                                          disabled={!canSelect}
+                                                          onMouseDown={(e) => {
+                                                            e.preventDefault()
+                                                            if (canSelect)
+                                                              selectPaxMember(
+                                                                paxKey,
+                                                                m,
+                                                                requiresMember,
+                                                              )
+                                                          }}
+                                                          className={`flex min-h-14 w-full items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2.5 text-left last:border-b-0 ${canSelect
+                                                            ? 'hover:bg-neutral-100'
+                                                            : 'cursor-not-allowed bg-neutral-50 opacity-60'
+                                                            }`}
+                                                        >
+                                                          <div className="min-w-0">
+                                                            <div className="text-sm font-bold text-neutral-950">
+                                                              {m.fullName} ({m.memberCode})
+                                                            </div>
+                                                            <div className="text-xs font-medium text-neutral-600">
+                                                              {m.phone}
+                                                              {blockedReason && (
+                                                                <span className="ml-1.5 font-bold text-rose-700">
+                                                                  · {blockedReason}
+                                                                </span>
+                                                              )}
+                                                            </div>
+                                                          </div>
+                                                          <StatusBadge
+                                                            tone={subsBadgeTone(m.subsStatus)}
+                                                          >
+                                                            {m.subsStatus}
+                                                          </StatusBadge>
+                                                        </button>
+                                                      )
+                                                    })}
+                                                  </div>
+                                                )}
+                                            </>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
+              ))}
+            </div>
+          )}
+          {/* </Card> */}
+
+          {/* STEP 2: TABLE SELECTION */}
+          {/* <Card> */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-lg font-extrabold text-neutral-950">
+              <Users className="h-5 w-5 text-neutral-700" />
+              2. Select Tables (Optional)
+            </h2>
+            {selectedTables.length > 0 && (
+              <StatusBadge tone="dark">
+                {selectedTables.length} {selectedTables.length === 1 ? 'table' : 'tables'} selected
+              </StatusBadge>
+            )}
+          </div>
+
+          {loadingMeta ? (
+            <p className="mt-4 text-sm font-medium text-neutral-600">Loading tables…</p>
+          ) : tables.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-6 text-center">
+              <p className="text-sm font-bold text-neutral-800">
+                No tables configured for this event
+              </p>
+              <p className="mt-1 text-sm text-neutral-600">
+                You can confirm this booking now and assign tables later.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {[...tables]
+                .sort((a, b) => Number(a.isReserved) - Number(b.isReserved))
+                .map((t) => {
+                  const isSelected = selectedTables.includes(t.tableLabel)
+                  return (
+                    <button
+                      key={t.tableLabel}
+                      type="button"
+                      disabled={t.isReserved}
+                      onClick={() => toggleTableSelection(t.tableLabel)}
+                      className={`flex min-h-16 flex-col items-start justify-between rounded-xl border p-3.5 text-left transition ${t.isReserved
+                        ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-500'
+                        : isSelected
+                          ? 'border-2 border-neutral-950 bg-neutral-900 text-white'
+                          : 'border-neutral-300 bg-white text-neutral-950 hover:border-neutral-500'
+                        }`}
+                    >
+                      <div className="flex w-full items-center justify-between gap-1">
+                        <span className="text-base font-extrabold">{t.tableLabel}</span>
+                        {(t.price || 0) > 0 && (
+                          <span
+                            className={`rounded-md px-1.5 py-0.5 text-xs font-bold tabular-nums ${t.isReserved
+                              ? 'bg-neutral-200 text-neutral-600'
+                              : isSelected
+                                ? 'bg-white/20 text-emerald-300'
+                                : 'bg-neutral-100 text-neutral-900'
+                              }`}
+                          >
+                            +₹{Number(t.price).toLocaleString('en-IN')}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className={`mt-1 text-xs font-medium ${isSelected ? 'text-neutral-300' : 'text-neutral-600'
+                          }`}
+                      >
+                        {t.tableTypeName}
+                      </div>
+                      <div className="mt-1.5 text-xs font-bold">
+                        {t.isReserved ? (
+                          <span className="text-rose-700">
+                            Reserved
+                          </span>
+                        ) : isSelected ? (
+                          <span className="text-emerald-300">✓ Selected</span>
+                        ) : (
+                          <span className="text-emerald-700">Available</span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+            </div>
+          )}
+          {/* </Card> */}
+        </div>
+
+        {/* Right Column: STEP 3 (Contact & Payment — High-Contrast Dark Card) */}
+        <div className="lg:col-span-2">
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 text-white sm:p-5 lg:sticky lg:top-20">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 text-lg font-extrabold text-white">
+                <UserCheck className="h-5 w-5 text-neutral-300" />
+                3. Contact &amp; Payment
+              </h2>
+              {selectedMember && (
+                <button
+                  type="button"
+                  onClick={clearMember}
+                  className="min-h-10 rounded-lg px-2 text-sm font-bold text-rose-300 hover:bg-rose-500/15"
+                >
+                  Unlink {selectedMember.memberCode}
+                </button>
               )}
             </div>
 
-            {/* 2. Table Selection (Optional at booking time) */}
-            <div className="ticket-perforation pt-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-neutral-900">
-                  <Users className="h-4 w-4 text-neutral-700" />
-                  2. Table Selection (Optional)
-                </h2>
-                {selectedTables.length > 0 && (
-                  <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-800">
-                    {selectedTables.length} table{selectedTables.length === 1 ? '' : 's'} selected
-                  </span>
+            <div className="mt-4 space-y-3.5">
+              {/* Booking Holder Name */}
+              <div className="relative">
+                <FieldLabel tone="dark">Booking Holder Name *</FieldLabel>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-neutral-500" />
+                  <TextInput
+                    type="text"
+                    required
+                    value={holderName}
+                    onFocus={() => setHolderFocused(true)}
+                    onBlur={() => setTimeout(() => setHolderFocused(false), 180)}
+                    onChange={(e) => {
+                      setHolderName(e.target.value)
+                      setHolderTouched(true)
+                      if (selectedMember) setSelectedMember(null)
+                      setHolderFocused(true)
+                    }}
+                    placeholder="Auto-fills from first guest…"
+                    className="border-neutral-700 pl-11 focus:border-white focus:ring-white/25"
+                  />
+                  {holderFocused && searchingMembers && (
+                    <Loader2 className="absolute right-3.5 top-3.5 h-5 w-5 animate-spin text-neutral-500" />
+                  )}
+                </div>
+
+                {visibleMemberResults.length > 0 && (
+                  <div className="absolute z-30 mt-1.5 max-h-60 w-full overflow-y-auto rounded-xl border border-neutral-300 bg-white shadow-xl">
+                    {visibleMemberResults.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          selectMember(m)
+                        }}
+                        className="flex min-h-14 w-full items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-neutral-100"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-neutral-950">
+                            {m.fullName} ({m.memberCode})
+                          </div>
+                          <div className="truncate text-xs font-medium text-neutral-600">
+                            {m.phone} {m.email ? `· ${m.email}` : ''}
+                          </div>
+                        </div>
+                        <StatusBadge tone={subsBadgeTone(m.subsStatus)}>
+                          {m.subsStatus}
+                        </StatusBadge>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 
-              {loadingMeta ? (
-                <div className="mt-3 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-8 text-center text-xs font-medium text-neutral-400">
-                  Loading tables…
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <div>
+                  <FieldLabel tone="dark">WhatsApp / Phone *</FieldLabel>
+                  <TextInput
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={(e) => {
+                      setPhone(e.target.value)
+                      setPhoneTouched(true)
+                    }}
+                    placeholder="9847012345"
+                    className="border-neutral-700 focus:border-white focus:ring-white/25"
+                  />
                 </div>
-              ) : tables.length === 0 ? (
-                <div className="mt-3 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-8 text-center">
-                  {/* <Users className="mx-auto h-7 w-7 text-neutral-300" /> */}
-                  <p className="mt-2 text-xs font-bold text-neutral-700">
-                    No tables configured for this event
-                  </p>
-                  <p className="mt-1 text-[11px] text-neutral-500">
-                    You can still confirm this booking now and assign tables later.
-                  </p>
+                <div>
+                  <FieldLabel tone="dark">Email *</FieldLabel>
+                  <TextInput
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value)
+                      setEmailTouched(true)
+                    }}
+                    placeholder="member@example.com"
+                    className="border-neutral-700 focus:border-white focus:ring-white/25"
+                  />
                 </div>
-              ) : (
-                <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
-                  {tables.map((t) => {
-                    const isSelected = selectedTables.includes(t.tableLabel)
+              </div>
+
+              {/* Payment Mode Tappable Buttons */}
+              <div>
+                <FieldLabel tone="dark">Payment Mode</FieldLabel>
+                <div className="grid grid-cols-2 gap-2">
+                  {paymentOptions.map((opt) => {
+                    const active = paymentMode === opt.key
                     return (
                       <button
-                        key={t.tableLabel}
+                        key={opt.key}
                         type="button"
-                        disabled={t.isReserved}
-                        onClick={() => toggleTableSelection(t.tableLabel)}
-                        className={`flex flex-col items-start justify-between rounded-lg border p-3 text-left text-xs transition ${t.isReserved
-                          ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400'
-                          : isSelected
-                            ? 'border-neutral-900 bg-neutral-100 text-neutral-900 ring-1 ring-neutral-900'
-                            : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-500'
+                        onClick={() => setPaymentMode(opt.key)}
+                        className={`min-h-12 rounded-xl border px-3 text-sm font-bold transition ${opt.key === 'COMPLIMENTARY' ? 'col-span-2' : ''
+                          } ${active
+                            ? 'border-emerald-400 bg-emerald-500 text-neutral-950'
+                            : 'border-neutral-700 bg-neutral-900 text-neutral-100 hover:border-emerald-500/60 hover:bg-neutral-800'
                           }`}
                       >
-                        <div className="flex w-full items-center justify-between">
-                          <span className="text-sm font-bold">{t.tableLabel}</span>
-                          {(t.price || 0) > 0 && (
-                            <span
-                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${t.isReserved
-                                ? 'bg-neutral-200 text-neutral-500'
-                                : isSelected
-                                  ? 'bg-neutral-900 text-white'
-                                  : 'bg-neutral-100 text-neutral-800'
-                                }`}
-                            >
-                              +₹{Number(t.price).toLocaleString('en-IN')}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1 text-[11px] text-neutral-500">{t.tableTypeName}</div>
-                        <div className="mt-1.5 text-[10px] font-semibold">
-                          {t.isReserved ? (
-                            <span className="text-rose-600">
-                              Reserved · {t.reservedByBookingCode}
-                            </span>
-                          ) : isSelected ? (
-                            <span className="text-neutral-900">✓ Selected</span>
-                          ) : (
-                            <span className="text-emerald-700">Available</span>
-                          )}
-                        </div>
+                        {opt.label}
                       </button>
                     )
                   })}
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Column: 3. Booking Contact, Summary & Payment */}
-          <div className="space-y-4 lg:col-span-2 lg:pb-0">
-            <div className="sticky top-20 rounded-3xl bg-neutral-950 p-5 text-white shadow-xl">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="flex items-center gap-2 text-sm font-bold text-white">
-                  <UserCheck className="h-4 w-4 text-neutral-300" />
-                  3. Booking Contact &amp; Payment
-                </h2>
-                {selectedMember && (
-                  <button
-                    type="button"
-                    onClick={clearMember}
-                    className="text-[11px] font-semibold text-neutral-400 transition hover:text-rose-400"
-                  >
-                    Unlink {selectedMember.memberCode}
-                  </button>
-                )}
               </div>
 
-              {/* Prefilled Booking Holder Contact */}
-              <div className="mt-4 space-y-3 border-b border-dashed border-white/15 pb-4">
-                <div className="relative">
-                  <label className="mb-1 block text-xs font-semibold text-neutral-300">
-                    Booking Name *
-                  </label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-neutral-400" />
-                    <input
-                      type="text"
-                      required
-                      value={holderName}
-                      onFocus={() => setHolderFocused(true)}
-                      onBlur={() => setTimeout(() => setHolderFocused(false), 180)}
-                      onChange={(e) => {
-                        setHolderName(e.target.value)
-                        setHolderTouched(true)
-                        if (selectedMember) setSelectedMember(null)
-                        setHolderFocused(true)
-                      }}
-                      placeholder="Auto-fills from first ticket..."
-                      className="w-full rounded-xl border border-white/15 bg-white py-2 pl-8 pr-3 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
-                    />
-                    {holderFocused && searchingMembers && (
-                      <span className="absolute right-2.5 top-2.5 text-xs text-neutral-400">
-                        …
-                      </span>
-                    )}
-                  </div>
-
-                  {visibleMemberResults.length > 0 && (
-                    <div className="absolute z-30 mt-1 max-h-52 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
-                      {visibleMemberResults.map((m) => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            selectMember(m)
-                          }}
-                          className="flex w-full items-center justify-between border-b border-neutral-100 px-3 py-2 text-left text-xs hover:bg-neutral-100"
-                        >
-                          <div>
-                            <div className="font-semibold text-neutral-900">
-                              {m.fullName} ({m.memberCode})
-                            </div>
-                            <div className="text-[10px] text-neutral-500">
-                              {m.phone} {m.email ? `· ${m.email}` : ''}
-                            </div>
-                          </div>
-                          <span
-                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${m.subsStatus === 'active'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : m.subsStatus === 'arrears'
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-rose-100 text-rose-800'
-                              }`}
-                          >
-                            {m.subsStatus}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid gap-2.5 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-neutral-300">
-                      WhatsApp / Phone *
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      value={phone}
-                      onChange={(e) => {
-                        setPhone(e.target.value)
-                        setPhoneTouched(true)
-                      }}
-                      placeholder="9847012345"
-                      className="w-full rounded-xl border border-white/15 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-neutral-300">
-                      Email *
-                    </label>
-                    <input
-                      type="email"
-                      value={email}
-                      required
-                      onChange={(e) => {
-                        setEmail(e.target.value)
-                        setEmailTouched(true)
-                      }}
-                      placeholder="member@example.com"
-                      className="w-full rounded-xl border border-white/15 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
-                    />
-                  </div>
-                </div>
+              <div>
+                <FieldLabel tone="dark">Notes (Optional)</FieldLabel>
+                <TextArea
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Vegetarian preference, wheelchair access…"
+                  className="border-neutral-700 focus:border-white focus:ring-white/25"
+                />
               </div>
 
-              <div className="mt-4 space-y-2 border-b border-white/15 pb-4 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Total Guests (Pax)</span>
-                  <span className="font-bold text-white tabular-nums">{totalPax}</span>
+              {/* Order Summary Box */}
+              <div className="space-y-2 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-neutral-300">Total Guests</span>
+                  <span className="font-extrabold text-white tabular-nums">{totalPax}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Tables Selected</span>
-                  <span className="font-semibold text-white tabular-nums">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-neutral-300">Tables</span>
+                  <span className="text-right font-bold text-white tabular-nums">
                     {selectedTables.length > 0 ? selectedTables.join(', ') : 'None'}
                     {tablesTotal > 0 ? ` (+₹${tablesTotal.toLocaleString('en-IN')})` : ''}
                   </span>
                 </div>
-                <div className="flex justify-between pt-2 text-base">
-                  <span className="font-bold text-white">Total Amount</span>
+                <div className="flex items-center justify-between border-t border-neutral-800 pt-2.5 text-lg">
+                  <span className="font-extrabold text-white">Total Amount</span>
                   <span className="font-extrabold text-emerald-400 tabular-nums">
                     ₹{totalAmount.toLocaleString('en-IN')}
                   </span>
                 </div>
               </div>
 
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-neutral-300">
-                    Payment Mode
-                  </label>
-                  <select
-                    value={paymentMode}
-                    onChange={(e) =>
-                      setPaymentMode(
-                        e.target.value as
-                        | 'RAZORPAY'
-                        | 'CASH'
-                        | 'OFFICER_UPI'
-                        | 'COMPLIMENTARY'
-                        | 'PAY_AT_DOOR',
-                      )
-                    }
-                    className="w-full rounded-xl border border-white/15 bg-white px-3 py-2.5 text-sm font-semibold text-neutral-900 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
-                  >
-                    <option value="RAZORPAY">Razorpay</option>
-                    <option value="CASH">Cash</option>
-                    <option value="OFFICER_UPI">Officer UPI</option>
-                    <option value="PAY_AT_DOOR">Pay at Door</option>
-                    <option value="COMPLIMENTARY">Complimentary (₹0)</option>
-                  </select>
+              {totalPax > 0 && duplicatePaxCount > 0 && (
+                <div className="rounded-xl border border-rose-400/40 bg-rose-500/15 px-3.5 py-2.5 text-sm font-bold text-rose-200">
+                  {duplicatePaxCount} duplicate or already-booked guest
+                  {duplicatePaxCount === 1 ? '' : 's'} — each ticket must have a unique guest.
                 </div>
+              )}
 
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-neutral-300">
-                    Notes (Optional)
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="e.g. Vegetarian preference, wheelchair access..."
-                    className="w-full rounded-xl border border-white/15 bg-white px-3 py-2 text-xs text-neutral-900 placeholder:text-neutral-400 focus:border-white focus:outline-none focus:ring-2 focus:ring-white/25"
-                  />
+              {totalPax > 0 && missingPaxCount > 0 && (
+                <div className="rounded-xl border border-amber-400/40 bg-amber-500/15 px-3.5 py-2.5 text-sm font-semibold text-amber-200">
+                  {missingMemberCount > 0
+                    ? `Select a registered member for ${missingMemberCount} Member-Only ticket${missingMemberCount === 1 ? '' : 's'}.`
+                    : `${missingPaxCount} guest name${missingPaxCount === 1 ? '' : 's'} required before confirming.`}
                 </div>
+              )}
 
-                {totalPax > 0 && duplicatePaxCount > 0 && (
-                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/15 px-3 py-2 text-[11px] font-semibold text-rose-200">
-                    {duplicatePaxCount} duplicate or already-booked attendee
-                    {duplicatePaxCount === 1 ? '' : 's'} — each ticket must have a unique guest.
-                  </div>
-                )}
-
-                {totalPax > 0 && missingPaxCount > 0 && (
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/15 px-3 py-2 text-[11px] font-medium text-amber-200">
-                    {missingMemberCount > 0
-                      ? `Select a registered member for ${missingMemberCount} Member-Only ticket${missingMemberCount === 1 ? '' : 's'}.`
-                      : `${missingPaxCount} guest name${missingPaxCount === 1 ? '' : 's'} required before confirming.`}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={
-                    !canCreate ||
-                    submitting ||
-                    totalPax === 0 ||
-                    missingPaxCount > 0 ||
-                    duplicatePaxCount > 0
-                  }
-                  className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-extrabold text-neutral-950 shadow-sm transition hover:bg-neutral-200 active:scale-[0.99] disabled:opacity-45"
-                >
-                  {submitting
-                    ? paymentMode === 'RAZORPAY' && totalAmount > 0
-                      ? 'Generating Razorpay Link…'
-                      : 'Creating Master QR Booking…'
-                    : paymentMode === 'RAZORPAY' && totalAmount > 0
-                      ? `Generate Payment QR · ₹${totalAmount.toLocaleString('en-IN')}`
+              <button
+                type="submit"
+                disabled={
+                  !canCreate ||
+                  submitting ||
+                  totalPax === 0 ||
+                  missingPaxCount > 0 ||
+                  duplicatePaxCount > 0
+                }
+                className={`inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-xl px-5 text-base font-extrabold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:cursor-not-allowed disabled:opacity-45 ${paymentMode === 'RAZORPAY' && totalAmount > 0
+                  ? 'bg-white text-neutral-950 hover:bg-neutral-200 active:bg-neutral-300'
+                  : 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400 active:bg-emerald-600'
+                  }`}
+              >
+                {submitting && <Loader2 className="h-5 w-5 shrink-0 animate-spin" />}
+                {submitting
+                  ? paymentMode === 'RAZORPAY' && totalAmount > 0
+                    ? 'Generating Razorpay Link…'
+                    : 'Creating Master QR Booking…'
+                  : paymentMode === 'RAZORPAY' && totalAmount > 0
+                    ? `Generate Payment QR · ₹${totalAmount.toLocaleString('en-IN')}`
+                    : paymentMode === 'PAY_AT_DOOR'
+                      ? `Reserve (Pay at Door) · ₹${totalAmount.toLocaleString('en-IN')}`
                       : `Confirm Booking · ₹${totalAmount.toLocaleString('en-IN')}`}
-                </button>
-              </div>
+              </button>
             </div>
           </div>
-        </form>
+        </div>
+      </form>
 
-      {/* PENDING RAZORPAY PAYMENT MODAL (10-Min Hold + Live Polling + 1-Tap Cash/UPI Switch) */}
+      {/* PENDING RAZORPAY PAYMENT MODAL */}
       {pendingPayment && (
         <PendingRazorpayModal
           key={pendingPayment.bookingId}
           pending={pendingPayment}
-          eventName={
-            events.find((e) => e.id === selectedEventId)?.name || pendingPayment.holderName
-          }
+          eventName={activeEventName}
           canSwitchManual={canCreate}
           onClose={() => setPendingPayment(null)}
           onConfirmed={() => {
@@ -1428,153 +1416,25 @@ export function BookingDeskClient({
         />
       )}
 
-      {/* POST-BOOKING RECEIPT & MASTER QR MODAL (Dark Frosted Glass Ticket Pass) */}
+      {/* SHARED MASTER QR RECEIPT MODAL */}
       {receipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/75 p-4 backdrop-blur-sm">
-          <div className="glass-surface w-full max-w-sm overflow-hidden rounded-3xl p-6 text-white shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-emerald-300">
-                <CheckCircle2 className="h-4 w-4" />
-                <span className="text-xs font-bold uppercase tracking-wider">
-                  Master QR Pass
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setReceipt(null)
-                  setResendFeedback(null)
-                }}
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-4 text-center">
-              <div className="text-xl font-extrabold tracking-tight text-white">
-                {events.find((e) => e.id === selectedEventId)?.name || receipt.holderName}
-              </div>
-              <div className="mt-1 text-xs text-neutral-300/80">
-                Show this QR code at the event entrance
-              </div>
-              <div className="mt-1 text-xs font-semibold text-neutral-200">
-                Ticket: {receipt.bookingCode} · {receipt.holderName} ({receipt.totalPax} Pax)
-              </div>
-
-              <div className="my-5 flex justify-center">
-                <QrPassImage key={receipt.bookingCode} bookingCode={receipt.bookingCode} />
-              </div>
-
-              {/* White Inset Info Card (Inspired by Reference Ticket Pass) */}
-              <div className="rounded-2xl bg-white p-3.5 text-left text-xs text-neutral-800 shadow-sm">
-                <div className="flex items-center justify-between border-b border-dashed border-neutral-200 pb-2">
-                  <div>
-                    <div className="text-[10px] font-medium text-neutral-400">Tables</div>
-                    <div className="font-bold text-neutral-900">{receipt.tablesSummary}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] font-medium text-neutral-400">Total</div>
-                    <div className="font-extrabold text-emerald-700">
-                      ₹{receipt.totalAmount.toLocaleString('en-IN')}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-2.5 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                      Ticket IDs (for physical cards if requested)
-                    </span>
-                  </div>
-                  {receipt.tickets.map((t) => {
-                    const isCopied = copiedCode === t.ticketCode
-                    return (
-                      <div
-                        key={t.id}
-                        className="flex items-center justify-between gap-2 rounded-xl bg-neutral-50 px-2.5 py-1.5"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-mono text-[11px] font-bold text-neutral-900">
-                            {t.ticketCode}
-                          </div>
-                          <div className="truncate text-[11px] text-neutral-600">
-                            {t.paxNames && t.paxNames.length > 0
-                              ? t.paxNames.join(', ')
-                              : `${t.paxCount} pax`}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyCode(t.ticketCode)}
-                          aria-label={`Copy Ticket ID ${t.ticketCode}`}
-                          className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[10px] font-bold transition ${isCopied
-                            ? 'bg-emerald-600 text-white'
-                            : 'border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100'
-                            }`}
-                        >
-                          {isCopied ? (
-                            <>
-                              <Check className="h-3 w-3" />
-                              Copied
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="h-3 w-3 text-neutral-400" />
-                              Copy
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {resendFeedback && (
-              <div
-                className={`mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-semibold ${resendFeedback.type === 'ok'
-                  ? 'border border-emerald-400/25 bg-emerald-500/15 text-emerald-200'
-                  : 'border border-rose-400/25 bg-rose-500/15 text-rose-200'
-                  }`}
-              >
-                {resendFeedback.text}
-              </div>
-            )}
-
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                disabled={resendingReceipt}
-                onClick={() => setShowResendModal(true)}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-white/10 px-3 py-2.5 text-xs font-semibold text-white backdrop-blur-md transition hover:bg-white/20 disabled:opacity-60"
-              >
-                {resendingReceipt ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Sending…
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-3.5 w-3.5" />
-                    Resend
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setReceipt(null)
-                  setShowResendModal(false)
-                  setResendFeedback(null)
-                }}
-                className="flex-1 rounded-2xl bg-white px-3 py-2.5 text-xs font-bold text-neutral-950 hover:bg-neutral-100"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
+        <TicketPassModal
+          eventName={activeEventName}
+          bookingCode={receipt.bookingCode}
+          holderName={receipt.holderName}
+          totalPax={receipt.totalPax}
+          totalAmount={receipt.totalAmount}
+          tablesSummary={receipt.tablesSummary}
+          tickets={receipt.tickets}
+          feedback={resendFeedback}
+          resending={resendingReceipt}
+          onResend={() => setShowResendModal(true)}
+          onClose={() => {
+            setReceipt(null)
+            setShowResendModal(false)
+            setResendFeedback(null)
+          }}
+        />
       )}
 
       {receipt && showResendModal && (
@@ -1632,103 +1492,37 @@ export function BookingDeskClient({
   )
 }
 
-function QrPassImage({ bookingCode }: { bookingCode: string }) {
-  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
-  const [retryCount, setRetryCount] = useState(0)
-
-  const src = `/api/qr/${encodeURIComponent(bookingCode)}?style=qr&v=5${retryCount > 0 ? `&r=${retryCount}` : ''}`
-
-  return (
-    <div className="relative flex h-56 w-56 items-center justify-center overflow-hidden rounded-2xl">
-      {status === 'loading' && (
-        <div
-          role="status"
-          aria-label="Loading QR code"
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5"
-        >
-          {/* Subtle pulsing QR finder-corner skeleton */}
-          <div className="pointer-events-none absolute inset-5 animate-pulse">
-            <div className="absolute left-0 top-0 h-8 w-8 rounded-lg border-[3px] border-white/15" />
-            <div className="absolute right-0 top-0 h-8 w-8 rounded-lg border-[3px] border-white/15" />
-            <div className="absolute bottom-0 left-0 h-8 w-8 rounded-lg border-[3px] border-white/15" />
-            <div className="absolute bottom-2 right-2 h-5 w-5 rounded bg-white/10" />
-          </div>
-          <Loader2 className="h-7 w-7 animate-spin text-emerald-300" />
-          <span className="text-[11px] font-medium tracking-wide text-neutral-300">
-            Loading QR…
-          </span>
-        </div>
-      )}
-
-      {status === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-center">
-          <AlertTriangle className="h-6 w-6 text-rose-300" />
-          <span className="text-xs font-semibold text-rose-200">
-            Couldn&apos;t load QR
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setStatus('loading')
-              setRetryCount((c) => c + 1)
-            }}
-            className="mt-1 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-white/25"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        key={retryCount}
-        src={src}
-        alt="Master QR"
-        onLoad={() => setStatus('loaded')}
-        onError={() => setStatus('error')}
-        className={`h-56 w-56 transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
-      />
-    </div>
-  )
-}
-
 function QrLinkImage({ paymentLinkUrl }: { paymentLinkUrl: string }) {
   const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
   const [retryCount, setRetryCount] = useState(0)
 
-  const src = `/api/qr/link?url=${encodeURIComponent(paymentLinkUrl)}${retryCount > 0 ? `&r=${retryCount}` : ''}`
+  const src = `/api/qr/link?url=${encodeURIComponent(paymentLinkUrl)}${retryCount > 0 ? `&r=${retryCount}` : ''
+    }`
 
   return (
-    <div className="relative flex h-52 w-52 items-center justify-center overflow-hidden rounded-2xl">
+    <div className="relative flex h-60 w-60 items-center justify-center overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900 p-3">
       {status === 'loading' && (
         <div
           role="status"
           aria-label="Loading Razorpay QR"
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-neutral-900"
         >
-          <div className="pointer-events-none absolute inset-4 animate-pulse">
-            <div className="absolute left-0 top-0 h-7 w-7 rounded-lg border-[3px] border-white/15" />
-            <div className="absolute right-0 top-0 h-7 w-7 rounded-lg border-[3px] border-white/15" />
-            <div className="absolute bottom-0 left-0 h-7 w-7 rounded-lg border-[3px] border-white/15" />
-          </div>
-          <Loader2 className="h-6 w-6 animate-spin text-amber-300" />
-          <span className="text-[11px] font-medium tracking-wide text-neutral-300">
-            Generating Payment QR…
-          </span>
+          <Loader2 className="h-7 w-7 animate-spin text-amber-400" />
+          <span className="text-sm font-semibold text-neutral-300">Generating QR…</span>
         </div>
       )}
 
       {status === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-center">
-          <AlertTriangle className="h-5 w-5 text-rose-300" />
-          <span className="text-xs font-semibold text-rose-200">QR failed to load</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-rose-950/80 p-4 text-center">
+          <AlertTriangle className="h-6 w-6 text-rose-300" />
+          <span className="text-sm font-bold text-rose-100">QR failed to load</span>
           <button
             type="button"
             onClick={() => {
               setStatus('loading')
               setRetryCount((c) => c + 1)
             }}
-            className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white hover:bg-white/25"
+            className="min-h-11 rounded-xl border border-neutral-700 bg-neutral-900 px-4 text-sm font-bold text-white hover:bg-neutral-800"
           >
             Retry
           </button>
@@ -1742,7 +1536,8 @@ function QrLinkImage({ paymentLinkUrl }: { paymentLinkUrl: string }) {
         alt="Razorpay Payment QR"
         onLoad={() => setStatus('loaded')}
         onError={() => setStatus('error')}
-        className={`h-52 w-52 transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+        className={`h-56 w-56 transition-opacity duration-200 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'
+          }`}
       />
     </div>
   )
@@ -1770,6 +1565,7 @@ function PendingRazorpayModal({
     tickets: Array<{
       id: number
       ticketCode: string
+      ticketTypeName?: string
       paxCount: number
       paxNames?: string[]
     }>
@@ -1792,7 +1588,6 @@ function PendingRazorpayModal({
   const secs = remainingSec % 60
   const countdownText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 
-  // 1-second countdown ticker
   useEffect(() => {
     if (expired) return
     const timer = setInterval(() => {
@@ -1801,7 +1596,6 @@ function PendingRazorpayModal({
     return () => clearInterval(timer)
   }, [expired])
 
-  // 3-second live Razorpay payment status poller
   useEffect(() => {
     if (expired) return
     let cancelled = false
@@ -1873,136 +1667,108 @@ function PendingRazorpayModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/75 p-4 backdrop-blur-sm">
-      <div className="glass-surface w-full max-w-sm overflow-hidden rounded-3xl p-6 text-white shadow-2xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-amber-300">
-            <Clock className="h-4 w-4" />
-            <span className="text-xs font-bold uppercase tracking-wider">
-              {expired ? 'Hold Expired' : 'Awaiting Razorpay'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {!expired && (
-              <span
-                className={`rounded-full px-2.5 py-0.5 font-mono text-xs font-bold tabular-nums ${remainingSec <= 120
-                  ? 'bg-rose-500/25 text-rose-200'
-                  : 'bg-amber-400/20 text-amber-200'
-                  }`}
+    <ModalShell
+      tone="dark"
+      title={expired ? 'Hold Expired' : 'Awaiting Payment'}
+      badge={
+        !expired ? (
+          <StatusBadge tone={remainingSec <= 120 ? 'rose' : 'amber'}>
+            <Clock className="h-3.5 w-3.5" />
+            {countdownText}
+          </StatusBadge>
+        ) : (
+          <StatusBadge tone="rose">Expired</StatusBadge>
+        )
+      }
+      subtitle={`${eventName} · ${pending.bookingCode} · ₹${pending.totalAmount.toLocaleString('en-IN')}`}
+      onClose={onClose}
+      maxWidthClass="max-w-md"
+      footer={
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex min-h-12 w-full items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 px-4 text-sm font-bold text-neutral-200 transition hover:bg-neutral-800 hover:text-white"
+        >
+          {expired ? 'Close' : 'Close & Serve Next (Confirms in Background)'}
+        </button>
+      }
+    >
+      <div className="space-y-4 text-center">
+        <p className="text-sm font-medium text-neutral-300">
+          {expired
+            ? '10-minute reservation expired. Held tables & guest slots have been released.'
+            : pending.email
+              ? `Ask ${pending.holderName} to scan the QR below or use the link sent to ${pending.email} / SMS.`
+              : `Ask ${pending.holderName} to scan the QR below or pay via the SMS link.`}
+        </p>
+
+        {!expired && (
+          <>
+            <div className="flex justify-center">
+              <QrLinkImage paymentLinkUrl={pending.paymentLinkUrl} />
+            </div>
+
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3.5 py-1.5 text-sm font-bold text-emerald-300">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Listening for payment confirmation…</span>
+            </div>
+
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-neutral-700 bg-neutral-900 px-4 text-sm font-bold text-white transition hover:bg-neutral-800"
               >
-                {countdownText}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close payment modal"
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-3 text-center">
-          <div className="text-lg font-extrabold tracking-tight text-white">{eventName}</div>
-          <div className="mt-0.5 text-xs font-semibold text-neutral-200 tabular-nums">
-            {pending.bookingCode} · {pending.holderName} · ₹
-            {pending.totalAmount.toLocaleString('en-IN')}
-          </div>
-          <div className="mt-1 text-[11px] text-neutral-300/80">
-            {expired
-              ? '10-minute reservation expired. Held tables & attendee slots have been released.'
-              : pending.email
-                ? `Scan QR below or pay via the link sent to ${pending.email} / SMS.`
-                : 'Scan QR below or pay via the SMS link sent to the booking holder.'}
-          </div>
-
-          {!expired && (
-            <>
-              <div className="my-4 flex justify-center">
-                <QrLinkImage paymentLinkUrl={pending.paymentLinkUrl} />
-              </div>
-
-              <div className="flex items-center justify-center gap-2 text-[11px] text-emerald-300/90">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Listening for payment confirmation…</span>
-              </div>
-
-              {/* Copy Link + Open Link (No WhatsApp — WhatsApp is strictly for Ticket Pass) */}
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyLink}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="h-3.5 w-3.5 text-emerald-300" />
-                      Copied Link
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3.5 w-3.5" />
-                      Copy Payment Link
-                    </>
-                  )}
-                </button>
-                <a
-                  href={pending.paymentLinkUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="Open Razorpay payment link"
-                  className="flex items-center justify-center rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              </div>
-            </>
-          )}
-
-          {switchError && (
-            <div className="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/15 px-3 py-2 text-[11px] font-medium text-rose-200">
-              {switchError}
+                {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                {copied ? 'Copied Link' : 'Copy Link'}
+              </button>
+              <a
+                href={pending.paymentLinkUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-extrabold text-neutral-950 transition hover:bg-neutral-200"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open
+              </a>
             </div>
-          )}
+          </>
+        )}
 
-          {/* 1-Tap Switch to Cash / Officer UPI fallback */}
-          {!expired && canSwitchManual && (
-            <div className="mt-4 border-t border-white/10 pt-3">
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                Customer paying in person instead?
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={switchingMode !== null}
-                  onClick={() => handleSwitchManual('CASH')}
-                  className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-neutral-200 disabled:opacity-50"
-                >
-                  {switchingMode === 'CASH' ? 'Switching…' : 'Switch to Cash'}
-                </button>
-                <button
-                  type="button"
-                  disabled={switchingMode !== null}
-                  onClick={() => handleSwitchManual('OFFICER_UPI')}
-                  className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20 disabled:opacity-50"
-                >
-                  {switchingMode === 'OFFICER_UPI' ? 'Switching…' : 'Switch to UPI'}
-                </button>
-              </div>
+        {switchError && (
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/15 px-3.5 py-2.5 text-sm font-semibold text-rose-200">
+            {switchError}
+          </div>
+        )}
+
+        {!expired && canSwitchManual && (
+          <div className="border-t border-neutral-800 pt-4">
+            <div className="mb-2.5 text-xs font-bold uppercase tracking-wide text-neutral-400">
+              Customer paying in person instead?
             </div>
-          )}
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="mt-3 w-full rounded-2xl border border-white/15 bg-transparent px-3 py-2 text-xs font-semibold text-neutral-300 transition hover:bg-white/10 hover:text-white"
-          >
-            {expired ? 'Close' : 'Close & Serve Next (Confirms in Background)'}
-          </button>
-        </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                disabled={switchingMode !== null}
+                onClick={() => handleSwitchManual('CASH')}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-extrabold text-neutral-950 transition hover:bg-neutral-200 disabled:opacity-45"
+              >
+                {switchingMode === 'CASH' && <Loader2 className="h-4 w-4 animate-spin" />}
+                Switch to Cash
+              </button>
+              <button
+                type="button"
+                disabled={switchingMode !== null}
+                onClick={() => handleSwitchManual('OFFICER_UPI')}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-neutral-700 bg-neutral-900 px-4 text-sm font-bold text-white transition hover:bg-neutral-800 disabled:opacity-45"
+              >
+                {switchingMode === 'OFFICER_UPI' && <Loader2 className="h-4 w-4 animate-spin" />}
+                Switch to UPI
+              </button>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </ModalShell>
   )
 }

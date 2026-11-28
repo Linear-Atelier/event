@@ -2,7 +2,7 @@ import React from 'react'
 import Link from 'next/link'
 import { Calendar, Lock, MapPin, QrCode, Sparkles, Ticket } from 'lucide-react'
 import { getEventColorTheme } from '@/lib/event-colors'
-import { formatEventDayLabel } from '@/lib/event-date'
+import { formatDaysUntilEvent, formatEventDayLabel } from '@/lib/event-date'
 
 export interface EventListItem {
   id: number
@@ -39,7 +39,7 @@ export function EventCard({ event: ev }: { event: EventListItem }) {
       {/* Top Colored Header Strip (Winter Skate Style) */}
       <div className="flex items-center justify-between gap-2 px-4 py-4 text-white">
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-xs font-semibold sm:text-sm">
+          <div className="flex items-center gap-2 text-sm font-semibold sm:text-sm">
             <Calendar className="h-4 w-4 shrink-0 text-white/90" />
             <span>
               {new Date(ev.date).toLocaleString('en-IN', {
@@ -51,7 +51,7 @@ export function EventCard({ event: ev }: { event: EventListItem }) {
               })}
             </span>
           </div>
-          <div className="flex items-center gap-2 text-xs font-semibold sm:text-sm">
+          <div className="flex items-center gap-2 text-sm font-semibold sm:text-sm">
             <MapPin className="h-4 w-4 shrink-0 text-white/90" />
             <span>{ev.venue}</span>
           </div>
@@ -65,7 +65,7 @@ export function EventCard({ event: ev }: { event: EventListItem }) {
       <div className="rounded-[30px] bg-white/95 p-5 backdrop-blur-sm">
         <div className="flex items-start justify-between gap-3">
           <Link href={`/events/${ev.id}`} className="group min-w-0 flex-1">
-            <div className="text-xs font-medium text-neutral-500">
+            <div className="text-sm font-medium text-neutral-500">
               {ev.bookingCount} bookings · {ev.totalPax} pax · ₹
               {ev.totalRevenue.toLocaleString('en-IN')}
             </div>
@@ -104,13 +104,13 @@ export function EventCard({ event: ev }: { event: EventListItem }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link
             href={`/events/${ev.id}`}
-            className="flex w-full items-center justify-center rounded-full bg-white px-4 py-4 text-xs font-bold text-neutral-700 shadow-xs ring-1 ring-neutral-200/80 transition hover:bg-neutral-50"
+            className="flex w-full items-center justify-center rounded-full bg-white px-4 py-4 font-bold text-neutral-700 shadow-xs ring-1 ring-neutral-200/80 transition hover:bg-neutral-50"
           >
             Dashboard
           </Link>
           <Link
             href={`/desk?eventId=${ev.id}`}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full bg-white px-4 py-4 text-xs font-bold shadow-xs ring-1 ring-neutral-200/80 transition hover:bg-neutral-50 ${theme.accentText}`}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full bg-white px-4 py-4 font-bold shadow-xs ring-1 ring-neutral-200/80 transition hover:bg-neutral-50 ${theme.accentText}`}
             title="New Booking"
           >
             <Ticket className="h-3.5 w-3.5" />
@@ -120,16 +120,16 @@ export function EventCard({ event: ev }: { event: EventListItem }) {
             <button
               type="button"
               disabled
-              className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded-full bg-neutral-100 px-4 py-4 text-xs font-bold text-neutral-400 ring-1 ring-neutral-200/80"
+              className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded-full bg-neutral-100 px-4 py-4 font-bold text-neutral-400 ring-1 ring-neutral-200/80"
               title={`Gate scan opens on ${formatEventDayLabel(ev.date)}`}
             >
               <Lock className="h-3.5 w-3.5" />
-              Scan
+              {formatDaysUntilEvent(ev.date)}
             </button>
           ) : (
             <Link
               href={`/scan?eventId=${ev.id}`}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-4 text-xs text-white font-bold shadow-xs transition`}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-4 text-white font-bold shadow-xs transition`}
               title="Gate QR Scanner"
               style={{ backgroundColor: theme.hex }}
             >

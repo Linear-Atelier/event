@@ -10,7 +10,7 @@ import {
   type PendingUpgradeTablesPayload,
 } from '@/lib/razorpay'
 
-type UpgradePaymentMode = 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'PAY_AT_DOOR' | 'COMPLIMENTARY'
+type UpgradePaymentMode = 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'ADD_TO_DOOR'
 
 export async function POST(
   request: Request,
@@ -43,8 +43,8 @@ export async function POST(
       body.paymentMode === 'RAZORPAY' ||
       body.paymentMode === 'CASH' ||
       body.paymentMode === 'OFFICER_UPI' ||
-      body.paymentMode === 'PAY_AT_DOOR' ||
-      body.paymentMode === 'COMPLIMENTARY'
+      body.paymentMode === 'COMPLIMENTARY' ||
+      body.paymentMode === 'ADD_TO_DOOR'
         ? body.paymentMode
         : 'CASH'
 
@@ -146,15 +146,31 @@ export async function POST(
       depth: 0,
     })
 
+    const existingLabels = existing.docs.map((row) => row.tableLabel)
+    const removedLabels = existingLabels.filter((lbl) => !requestedLabels.includes(lbl))
+    if (removedLabels.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Already-assigned table(s) (${removedLabels.join(', ')}) cannot be removed.`,
+        },
+        { status: 400 },
+      )
+    }
+
     const existingTableFee = existing.docs.reduce(
       (sum, row) => sum + Math.max(0, Number(row.price) || 0),
       0,
     )
+    const existingCatalogFee = existing.docs.reduce(
+      (sum, row) => sum + Math.max(0, Number(virtualByLabel.get(row.tableLabel)?.price) || 0),
+      0,
+    )
+    const existingCredit = Math.max(existingTableFee, existingCatalogFee)
     const newTableFee = requestedLabels.reduce(
       (sum, lbl) => sum + Math.max(0, Number(virtualByLabel.get(lbl)?.price) || 0),
       0,
     )
-    const additionalDue = Math.max(0, newTableFee - existingTableFee)
+    const additionalDue = Math.max(0, newTableFee - existingCredit)
 
     // Cancel any previously pending Razorpay table-upgrade link
     const prevPendingUpgrade = booking.pendingUpgradeTables as
@@ -163,6 +179,32 @@ export async function POST(
       | undefined
     if (prevPendingUpgrade?.gatewayRefId) {
       await cancelRazorpayPaymentLink(prevPendingUpgrade.gatewayRefId)
+    }
+
+    // Enforce single payment status: ADD_TO_DOOR is only valid on an unpaid pay_at_door booking
+    const isUnpaidDoorBooking = booking.status === 'pay_at_door'
+    if (additionalDue > 0 && paymentMode === 'ADD_TO_DOOR' && !isUnpaidDoorBooking) {
+      return NextResponse.json(
+        {
+          error:
+            'Paid bookings must settle additional table fees immediately via Razorpay, Cash, Officer UPI, or Waive.',
+        },
+        { status: 400 },
+      )
+    }
+    if (
+      additionalDue > 0 &&
+      isUnpaidDoorBooking &&
+      paymentMode !== 'ADD_TO_DOOR' &&
+      paymentMode !== 'COMPLIMENTARY'
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Unpaid Pay-at-Door bookings can only add table fees to the door balance or waive them. Use Collect Due to settle the full booking.',
+        },
+        { status: 400 },
+      )
     }
 
     // If additional fee is due via Razorpay, create a Payment Link and hold the upgrade until paid
@@ -258,13 +300,19 @@ export async function POST(
     if (additionalDue > 0 || prevPendingUpgrade) {
       const chargeAmount = paymentMode === 'COMPLIMENTARY' ? 0 : additionalDue
       updatedTotalAmount = booking.totalAmount + chargeAmount
-      if (chargeAmount > 0 && paymentMode !== 'PAY_AT_DOOR') {
+      if (chargeAmount > 0 && !isUnpaidDoorBooking) {
         updatedPaidAmount = prevPaidAmount + chargeAmount
       }
 
       const upgradeNote =
         additionalDue > 0
-          ? `[Table fee ${paymentMode === 'COMPLIMENTARY' ? 'waived' : `+₹${additionalDue.toLocaleString('en-IN')} via ${paymentMode}`} by ${user.name || user.email}]`
+          ? `[Table fee ${
+              paymentMode === 'COMPLIMENTARY'
+                ? 'waived'
+                : isUnpaidDoorBooking
+                  ? `+₹${additionalDue.toLocaleString('en-IN')} added to Pay-at-Door balance`
+                  : `+₹${additionalDue.toLocaleString('en-IN')} via ${paymentMode}`
+            } by ${user.name || user.email}]`
           : ''
 
       await payload.update({
@@ -276,9 +324,6 @@ export async function POST(
           totalAmount: updatedTotalAmount,
           paidAmount: updatedPaidAmount,
           pendingUpgradeTables: null,
-          ...(additionalDue > 0 && paymentMode === 'PAY_AT_DOOR'
-            ? { paymentStatus: 'pending', paymentMode: 'PAY_AT_DOOR' }
-            : {}),
           ...(upgradeNote
             ? { notes: booking.notes ? `${booking.notes}\n${upgradeNote}` : upgradeNote }
             : {}),

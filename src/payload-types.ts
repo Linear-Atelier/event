@@ -466,10 +466,13 @@ export interface Booking {
     | number
     | boolean
     | null;
-  status: 'confirmed' | 'pending_payment' | 'cancelled' | 'transferred';
+  status: 'confirmed' | 'pay_at_door' | 'pending_payment' | 'cancelled';
   notes?: string | null;
   qrSignature?: string | null;
-  paymentMode: 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR';
+  /**
+   * Empty while booking is Pay at Door; populated once payment is collected.
+   */
+  paymentMode?: ('RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY') | null;
   paymentStatus: 'paid' | 'pending' | 'refunded';
   collectedByOfficer?: (number | null) | User;
   settlementStatus: 'with_officer' | 'transferred_to_treasurer' | 'received_by_treasurer';

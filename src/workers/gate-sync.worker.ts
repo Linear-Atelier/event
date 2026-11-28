@@ -56,6 +56,7 @@ async function runFullSync(eventId: number, manual: boolean) {
         body: JSON.stringify({
           checkins: pending.map((p) => ({
             slotId: p.slotId,
+            bookingId: p.bookingId,
             checkedInAt: p.checkedInAt,
             deviceId: p.deviceId,
             method: p.method,
@@ -97,9 +98,28 @@ async function runFullSync(eventId: number, manual: boolean) {
       throw new Error(rosterData.error || `Roster sync failed (HTTP ${rosterRes.status})`)
     }
 
-    // Preserve any local check-ins that are still unsynced (e.g. checked in mid-sync)
+    // Preserve any local check-ins & door settlements that are still unsynced
     const stillPending = await offlineDb.pendingSync.where('synced').equals(0).toArray()
     const pendingBySlotId = new Map(stillPending.map((p) => [p.slotId, p]))
+    const pendingDoorByBookingId = new Map(
+      stillPending
+        .filter((p) => Boolean(p.doorPaymentMode))
+        .map((p) => [p.bookingId, p.doorPaymentMode!]),
+    )
+
+    const mergedBookings: CachedBooking[] = (rosterData.bookings || []).map((b) => {
+      const localDoorMode = pendingDoorByBookingId.get(b.id)
+      if (localDoorMode && (b.status === 'pay_at_door' || b.paymentStatus !== 'paid')) {
+        return {
+          ...b,
+          status: 'confirmed',
+          paymentMode: localDoorMode,
+          paymentStatus: 'paid',
+          totalAmount: localDoorMode === 'COMPLIMENTARY' ? 0 : b.totalAmount,
+        }
+      }
+      return b
+    })
 
     const mergedSlots: CachedSlot[] = (rosterData.slots || []).map((slot) => {
       const localPending = pendingBySlotId.get(slot.id)
@@ -129,8 +149,8 @@ async function runFullSync(eventId: number, manual: boolean) {
           await offlineDb.tickets.where('bookingId').anyOf(oldIds).delete()
           await offlineDb.slots.where('bookingId').anyOf(oldIds).delete()
         }
-        if (rosterData.bookings?.length) {
-          await offlineDb.bookings.bulkPut(rosterData.bookings)
+        if (mergedBookings.length) {
+          await offlineDb.bookings.bulkPut(mergedBookings)
         }
         if (rosterData.tickets?.length) {
           await offlineDb.tickets.bulkPut(rosterData.tickets)

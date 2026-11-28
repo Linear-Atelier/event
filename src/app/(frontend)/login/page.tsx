@@ -4,6 +4,13 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, KeyRound, Lock, Mail, RotateCw } from 'lucide-react'
 import Image from 'next/image'
+import {
+  Button,
+  Card,
+  FieldLabel,
+  SegmentedTabs,
+  TextInput,
+} from '@/components/ui/primitives'
 
 type LoginMode = 'password' | 'otp'
 
@@ -120,149 +127,124 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-5 py-10">
-      <div className="w-full max-w-sm">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-50 px-4 py-8">
+      <div className="w-full max-w-md">
         {/* Brand Header */}
-        <div className="flex flex-col items-center gap-3.5">
-          <Image src="/AIAIA Logo.png" alt="logo" width={60} height={60} />
-          <div className='flex flex-col items-center'>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-800">
+        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+          <Image src="/AIAIA Logo.png" alt="AIAIA Cochin logo" width={64} height={64} />
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-neutral-600">
               AIAIA Cochin Branch
             </p>
-            <h1 className="text-xl font-extrabold tracking-tight text-neutral-800">
-              Committee Portal
+            <h1 className="mt-0.5 text-2xl font-extrabold tracking-tight text-neutral-950">
+              Committee Sign In
             </h1>
           </div>
         </div>
 
-        {/* Soft Pill Mode Switcher */}
-        <div className="mt-6 grid grid-cols-2 gap-1 rounded-2xl bg-neutral-100/90 p-1">
-          <button
-            type="button"
-            onClick={() => switchMode('otp')}
-            className={`rounded-xl py-2 text-xs font-bold transition ${mode === 'otp'
-              ? 'bg-white text-neutral-950 shadow-xs'
-              : 'text-neutral-500 hover:text-neutral-800'
-              }`}
-          >
-            Email OTP
-          </button>
-          <button
-            type="button"
-            onClick={() => switchMode('password')}
-            className={`rounded-xl py-2 text-xs font-bold transition ${mode === 'password'
-              ? 'bg-white text-neutral-950 shadow-xs'
-              : 'text-neutral-500 hover:text-neutral-800'
-              }`}
-          >
-            Password
-          </button>
-        </div>
+        <SegmentedTabs
+          value={mode}
+          onChange={switchMode}
+          items={[
+            { key: 'otp', label: 'Email Code (OTP)' },
+            { key: 'password', label: 'Password' },
+          ]}
+        />
 
         {/* Password Login Form */}
         {mode === 'password' && (
-          <form onSubmit={handlePasswordSubmit} className="mt-6 space-y-4">
+          <form onSubmit={handlePasswordSubmit} className="mt-5 space-y-4">
             {error && (
-              <div className="rounded-2xl bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
                 {error}
               </div>
             )}
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
-                Committee Email
-              </label>
+              <FieldLabel htmlFor="login-email-pw">Committee Email</FieldLabel>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-neutral-400" />
-                <input
+                <Mail className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-neutral-500" />
+                <TextInput
+                  id="login-email-pw"
                   type="email"
                   required
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="officer@aiaiacochin.org"
-                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-2.5 pl-10 pr-4 text-sm text-neutral-950 placeholder-neutral-400 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
+                  className="pl-11"
                 />
               </div>
             </div>
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
-                Password
-              </label>
+              <FieldLabel htmlFor="login-password">Password</FieldLabel>
               <div className="relative">
-                <Lock className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-neutral-400" />
-                <input
+                <Lock className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-neutral-500" />
+                <TextInput
+                  id="login-password"
                   type="password"
                   required
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-2.5 pl-10 pr-4 text-sm text-neutral-950 placeholder-neutral-400 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
+                  placeholder="Enter your password"
+                  className="pl-11"
                 />
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-neutral-800 active:scale-[0.99] disabled:opacity-50"
-            >
+            <Button type="submit" loading={loading} fullWidth size="lg">
               {loading ? 'Signing in…' : 'Sign In'}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </button>
+              {!loading && <ArrowRight className="h-5 w-5" />}
+            </Button>
           </form>
         )}
 
-        {/* Email OTP Login Flow */}
+        {/* Email OTP Step 1 */}
         {mode === 'otp' && !otpSent && (
-          <form onSubmit={handleSendOtpSubmit} className="mt-6 space-y-4">
+          <form onSubmit={handleSendOtpSubmit} className="mt-5 space-y-4">
             {error && (
-              <div className="rounded-2xl bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
                 {error}
               </div>
             )}
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
-                Committee Email
-              </label>
+              <FieldLabel htmlFor="login-email-otp">Committee Email</FieldLabel>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-neutral-400" />
-                <input
+                <Mail className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-neutral-500" />
+                <TextInput
+                  id="login-email-otp"
                   type="email"
                   required
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="officer@aiaiacochin.org"
-                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-2.5 pl-10 pr-4 text-sm text-neutral-950 placeholder-neutral-400 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
+                  className="pl-11"
                 />
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-neutral-800 active:scale-[0.99] disabled:opacity-50"
-            >
+            <Button type="submit" loading={loading} fullWidth size="lg">
               {loading ? 'Sending code…' : 'Send 6-Digit Code'}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </button>
+              {!loading && <ArrowRight className="h-5 w-5" />}
+            </Button>
           </form>
         )}
 
+        {/* Email OTP Step 2 */}
         {mode === 'otp' && otpSent && (
-          <form onSubmit={handleVerifyOtpSubmit} className="mt-6 space-y-4">
+          <form onSubmit={handleVerifyOtpSubmit} className="mt-5 space-y-4">
             {error && (
-              <div className="rounded-2xl bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
                 {error}
               </div>
             )}
 
             {info && (
-              <div className="flex items-center justify-between gap-2 rounded-2xl bg-neutral-100 px-4 py-3 text-xs font-medium text-neutral-900">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-medium text-neutral-900">
                 <span>{info}</span>
                 <button
                   type="button"
@@ -272,7 +254,7 @@ export default function LoginPage() {
                     setError(null)
                     setInfo(null)
                   }}
-                  className="shrink-0 font-bold text-neutral-900 underline underline-offset-2 hover:text-neutral-900"
+                  className="min-h-10 shrink-0 rounded-lg px-2 text-sm font-bold text-neutral-900 underline underline-offset-2 hover:bg-neutral-200/70"
                 >
                   Change
                 </button>
@@ -280,12 +262,11 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold text-neutral-700">
-                6-Digit Verification Code
-              </label>
+              <FieldLabel htmlFor="login-otp-code">6-Digit Verification Code</FieldLabel>
               <div className="relative">
-                <KeyRound className="pointer-events-none absolute left-3.5 top-4.5 h-4 w-4 text-neutral-400" />
-                <input
+                <KeyRound className="pointer-events-none absolute left-3.5 top-4 h-5 w-5 text-neutral-500" />
+                <TextInput
+                  id="login-otp-code"
                   type="text"
                   inputMode="numeric"
                   pattern="[0-9]{6}"
@@ -296,37 +277,41 @@ export default function LoginPage() {
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   placeholder="000000"
-                  className="w-full rounded-2xl border border-neutral-200 bg-neutral-50/70 py-3 pl-10 pr-4 text-center text-lg font-extrabold tracking-[0.35em] text-neutral-950 placeholder-neutral-300 transition focus:border-neutral-900 focus:bg-white focus:outline-none"
+                  className="min-h-14 pl-11 text-center text-2xl font-extrabold tracking-[0.35em]"
                 />
               </div>
             </div>
 
-            <button
+            <Button
               type="submit"
-              disabled={loading || otpCode.length !== 6}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-neutral-800 active:scale-[0.99] disabled:opacity-50"
+              loading={loading}
+              disabled={otpCode.length !== 6}
+              fullWidth
+              size="lg"
             >
               {loading ? 'Verifying…' : 'Verify & Sign In'}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </button>
+              {!loading && <ArrowRight className="h-5 w-5" />}
+            </Button>
 
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
+              fullWidth
               disabled={loading || resendCooldown > 0}
               onClick={requestOtpCode}
-              className="inline-flex w-full items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:text-neutral-900 disabled:opacity-50"
             >
-              <RotateCw className="h-3.5 w-3.5" />
+              <RotateCw className="h-4 w-4" />
               {resendCooldown > 0
                 ? `Resend code in ${resendCooldown}s`
                 : 'Resend 6-digit code'}
-            </button>
+            </Button>
           </form>
         )}
 
-        <div className="ticket-perforation mt-8 flex flex-col pt-5 text-center text-sm font-medium text-neutral-400">
-          <span className="font-bold text-neutral-600">Linear Atelier | Ticketing Partner</span>
-        </div>
+        <p className="mt-6 text-center text-sm font-semibold text-neutral-600">
+          Linear Atelier · Ticketing Partner
+        </p>
       </div>
     </div>
   )

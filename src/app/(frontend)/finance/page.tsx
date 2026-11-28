@@ -49,60 +49,60 @@ export default async function FinancePage(props: {
   ])
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+    <main className="mx-auto w-full max-w-2xl px-4 py-5 sm:px-6 lg:max-w-5xl pb-24">
       <FinanceClient
-          events={eventsRes.docs.map((e) => ({
-            id: e.id,
-            code: e.code,
-            name: e.name,
-            date: e.date,
-            fyCode: getFinancialYearForDate(e.date).code,
-          }))}
-          currentFyCode={currentFy.code}
-          initialFyCode={requestedFy}
-          initialEventId={initialEventId}
-          canConfirmReceived={canConfirmReceived}
-          canMarkTransferred={canMarkTransferred}
-          bookings={bookingsRes.docs.map((b) => {
-            const evId = typeof b.event === 'object' ? (b.event as Event).id : b.event
-            const officer =
-              typeof b.collectedByOfficer === 'object' && b.collectedByOfficer !== null
-                ? (b.collectedByOfficer as User).name
-                : 'Unassigned'
-            const settlementStatus: SettlementStatus =
-              b.settlementStatus === 'received_by_treasurer' || b.treasurerVerified
-                ? 'received_by_treasurer'
-                : b.settlementStatus === 'transferred_to_treasurer'
-                  ? 'transferred_to_treasurer'
-                  : 'with_officer'
+        events={eventsRes.docs.map((e) => ({
+          id: e.id,
+          code: e.code,
+          name: e.name,
+          date: e.date,
+          fyCode: getFinancialYearForDate(e.date).code,
+        }))}
+        currentFyCode={currentFy.code}
+        initialFyCode={requestedFy}
+        initialEventId={initialEventId}
+        canConfirmReceived={canConfirmReceived}
+        canMarkTransferred={canMarkTransferred}
+        bookings={bookingsRes.docs.map((b) => {
+          const evId = typeof b.event === 'object' ? (b.event as Event).id : b.event
+          const officer =
+            typeof b.collectedByOfficer === 'object' && b.collectedByOfficer !== null
+              ? (b.collectedByOfficer as User).name
+              : 'Unassigned'
+          const settlementStatus: SettlementStatus =
+            b.settlementStatus === 'received_by_treasurer' || b.treasurerVerified
+              ? 'received_by_treasurer'
+              : b.settlementStatus === 'transferred_to_treasurer'
+                ? 'transferred_to_treasurer'
+                : 'with_officer'
 
-            return {
-              id: b.id,
-              eventId: evId,
-              bookingCode: b.bookingCode,
-              holderName: b.holderName,
-              phone: b.phone,
-              totalPax: b.totalPax,
-              totalAmount: b.totalAmount,
-              paidAmount:
-                typeof b.paidAmount === 'number'
-                  ? b.paidAmount
-                  : b.paymentStatus === 'paid'
-                    ? b.totalAmount
-                    : 0,
-              refundAmount: Number(b.refundAmount) || 0,
-              refundMethod: b.refundMethod || 'NONE',
-              paymentMode: b.paymentMode,
-              paymentStatus: b.paymentStatus,
-              status: b.status,
-              officerName: officer,
-              settlementStatus,
-              transferReference: b.transferReference || null,
-              transferredAt: b.transferredAt || null,
-              receivedAt: b.treasurerVerifiedAt || null,
-              createdAt: b.createdAt,
-            }
-          })}
+          return {
+            id: b.id,
+            eventId: evId,
+            bookingCode: b.bookingCode,
+            holderName: b.holderName,
+            phone: b.phone,
+            totalPax: b.totalPax,
+            totalAmount: b.totalAmount,
+            paidAmount:
+              typeof b.paidAmount === 'number'
+                ? b.paidAmount
+                : b.paymentStatus === 'paid'
+                  ? b.totalAmount
+                  : 0,
+            refundAmount: Number(b.refundAmount) || 0,
+            refundMethod: b.refundMethod || 'NONE',
+            paymentMode: b.paymentMode || null,
+            paymentStatus: b.paymentStatus,
+            status: b.status,
+            officerName: officer,
+            settlementStatus,
+            transferReference: b.transferReference || null,
+            transferredAt: b.transferredAt || null,
+            receivedAt: b.treasurerVerifiedAt || null,
+            createdAt: b.createdAt,
+          }
+        })}
       />
     </main>
   )

@@ -78,11 +78,12 @@ export async function GET(
       })
     }
 
-    // If still pending payment (either pending_payment hold or PAY_AT_DOOR with a generated Razorpay link),
+    // If still pending payment (either pending_payment hold or pay_at_door with a generated Razorpay link),
     // actively check Razorpay API (works even on localhost without webhook!)
     if (
       booking.status === 'pending_payment' ||
-      (booking.paymentStatus === 'pending' && Boolean(booking.gatewayRefId))
+      ((booking.status === 'pay_at_door' || booking.paymentStatus === 'pending') &&
+        Boolean(booking.gatewayRefId))
     ) {
       if (booking.gatewayRefId) {
         const rzp = await fetchRazorpayPaymentLink(booking.gatewayRefId).catch(() => null)

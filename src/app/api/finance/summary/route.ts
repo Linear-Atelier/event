@@ -24,7 +24,7 @@ export async function GET(request: Request) {
       : sql`AND e.date >= ${fy.startIso} AND e.date <= ${fy.endIso}`
 
     const netExpr = sql`CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END`
-    const revenueWhere = sql`WHERE b.status != 'pending_payment' AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0) ${scopeFilter}`
+    const revenueWhere = sql`WHERE b.status NOT IN ('pending_payment', 'pay_at_door') AND b.payment_status != 'pending' AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0) ${scopeFilter}`
 
     const [byPaymentModeRes, byOfficerRes, totalsRes] = await Promise.all([
       db.execute(sql`
@@ -52,7 +52,6 @@ export async function GET(request: Request) {
           COALESCE(SUM(CASE WHEN b.payment_mode = 'RAZORPAY' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "razorpayAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "cashAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "upiAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "doorAmount",
           COALESCE(SUM(${netExpr}), 0)::numeric AS "totalAmount",
           COALESCE(SUM(CASE WHEN b.settlement_status = 'received_by_treasurer' OR b.treasurer_verified = true THEN ${netExpr} ELSE 0 END), 0)::numeric AS "receivedAmount",
           COALESCE(SUM(CASE WHEN b.settlement_status = 'transferred_to_treasurer' AND b.treasurer_verified IS NOT TRUE THEN ${netExpr} ELSE 0 END), 0)::numeric AS "transferredAmount",
@@ -68,11 +67,13 @@ export async function GET(request: Request) {
         SELECT
           COUNT(CASE WHEN b.status != 'cancelled' THEN 1 END)::int AS "activeBookings",
           COALESCE(SUM(CASE WHEN b.status != 'cancelled' THEN b.total_pax ELSE 0 END), 0)::int AS "totalPax",
-          COALESCE(SUM(${netExpr}), 0)::numeric AS "grossRevenue",
+          COALESCE(SUM(CASE WHEN b.status != 'pay_at_door' AND b.payment_status != 'pending' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "grossRevenue",
+          COUNT(CASE WHEN b.status = 'pay_at_door' THEN 1 END)::int AS "doorDueCount",
+          COALESCE(SUM(CASE WHEN b.status = 'pay_at_door' THEN b.total_amount ELSE 0 END), 0)::numeric AS "doorDueRevenue",
           COALESCE(SUM(COALESCE(b.refund_amount, 0)), 0)::numeric AS "totalRefunded",
-          COALESCE(SUM(CASE WHEN b.settlement_status = 'received_by_treasurer' OR b.treasurer_verified = true THEN ${netExpr} ELSE 0 END), 0)::numeric AS "receivedRevenue",
-          COALESCE(SUM(CASE WHEN b.settlement_status = 'transferred_to_treasurer' AND b.treasurer_verified IS NOT TRUE THEN ${netExpr} ELSE 0 END), 0)::numeric AS "transferredRevenue",
-          COALESCE(SUM(CASE WHEN (b.settlement_status = 'with_officer' OR b.settlement_status IS NULL) AND b.treasurer_verified IS NOT TRUE THEN ${netExpr} ELSE 0 END), 0)::numeric AS "withOfficerRevenue"
+          COALESCE(SUM(CASE WHEN b.status != 'pay_at_door' AND b.payment_status != 'pending' AND (b.settlement_status = 'received_by_treasurer' OR b.treasurer_verified = true) THEN ${netExpr} ELSE 0 END), 0)::numeric AS "receivedRevenue",
+          COALESCE(SUM(CASE WHEN b.status != 'pay_at_door' AND b.payment_status != 'pending' AND b.settlement_status = 'transferred_to_treasurer' AND b.treasurer_verified IS NOT TRUE THEN ${netExpr} ELSE 0 END), 0)::numeric AS "transferredRevenue",
+          COALESCE(SUM(CASE WHEN b.status != 'pay_at_door' AND b.payment_status != 'pending' AND (b.settlement_status = 'with_officer' OR b.settlement_status IS NULL) AND b.treasurer_verified IS NOT TRUE THEN ${netExpr} ELSE 0 END), 0)::numeric AS "withOfficerRevenue"
         FROM bookings b
         JOIN events e ON e.id = b.event_id
         WHERE b.status != 'pending_payment' ${scopeFilter}

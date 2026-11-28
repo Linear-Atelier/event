@@ -17,6 +17,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const payload = await getPayload({ config })
 
+    const isPayAtDoor = Boolean(body.payAtDoor) || body.paymentMode === 'PAY_AT_DOOR'
     const result = await createFullBooking({
       payload,
       user,
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
       holderName: String(body.holderName || ''),
       phone: String(body.phone || ''),
       email: body.email ? String(body.email) : null,
-      paymentMode: body.paymentMode || 'CASH',
+      payAtDoor: isPayAtDoor,
+      paymentMode: isPayAtDoor ? null : body.paymentMode || 'CASH',
       paymentStatus: body.paymentStatus,
       notes: body.notes,
       tickets: Array.isArray(body.tickets) ? body.tickets : [],

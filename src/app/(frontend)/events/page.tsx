@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import { getServerUser } from '@/lib/auth'
-import { isScanAllowedForEventDate } from '@/lib/event-date'
+import { isEventPast, isScanAllowedForEventDate } from '@/lib/event-date'
 import { EventsListClient } from '@/components/EventsListClient'
 
 export const dynamic = 'force-dynamic'
@@ -19,7 +19,7 @@ async function loadEventListItems(user: NonNullable<Awaited<ReturnType<typeof ge
     depth: 0,
   })
 
-  const cutoffMs = Date.now() - 24 * 60 * 60 * 1000
+  const now = new Date()
 
   return Promise.all(
     eventsRes.docs.map(async (ev) => {
@@ -30,13 +30,12 @@ async function loadEventListItems(user: NonNullable<Awaited<ReturnType<typeof ge
         where: {
           and: [
             { event: { equals: ev.id } },
-            { status: { not_equals: 'cancelled' } },
+            { status: { not_in: ['cancelled', 'pending_payment'] } },
           ],
         },
         limit: 1000,
         depth: 0,
       })
-      const evMs = new Date(ev.date).getTime()
       return {
         id: ev.id,
         code: ev.code,
@@ -46,11 +45,15 @@ async function loadEventListItems(user: NonNullable<Awaited<ReturnType<typeof ge
         color: ev.color || 'sky',
         icon: ev.icon || null,
         iconSvg: ev.iconSvg || null,
-        isPast: !Number.isNaN(evMs) && evMs < cutoffMs,
-        isScanOpen: isScanAllowedForEventDate(ev.date),
+        isPast: isEventPast(ev.date, now),
+        isScanOpen: isScanAllowedForEventDate(ev.date, now),
         bookingCount: bookings.totalDocs,
         totalPax: bookings.docs.reduce((s, b) => s + (b.totalPax || 0), 0),
-        totalRevenue: bookings.docs.reduce((s, b) => s + (b.totalAmount || 0), 0),
+        totalRevenue: bookings.docs.reduce(
+          (s, b) =>
+            s + (b.status === 'pay_at_door' || b.paymentStatus === 'pending' ? 0 : b.totalAmount || 0),
+          0,
+        ),
       }
     }),
   )
@@ -63,7 +66,7 @@ export default async function EventsPage() {
   const items = await loadEventListItems(user)
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+    <main className="mx-auto w-full max-w-2xl px-4 py-5 sm:px-6 pb-24">
       <EventsListClient events={items} />
     </main>
   )

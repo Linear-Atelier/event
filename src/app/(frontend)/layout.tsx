@@ -38,7 +38,7 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
         {user ? (
           <div className="flex min-h-screen flex-col">
             <AppNavbar user={user} />
-            <div className="flex-1 pb-24">{children}</div>
+            <div className="">{children}</div>
           </div>
         ) : (
           children

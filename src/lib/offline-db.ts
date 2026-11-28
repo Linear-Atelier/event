@@ -20,7 +20,7 @@ export interface CachedBooking {
   totalPax: number
   totalAmount: number
   status: string
-  paymentMode: string
+  paymentMode: string | null
   paymentStatus: string
   tablesSummary: string
   qrSignature: string

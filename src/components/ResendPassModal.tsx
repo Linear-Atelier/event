@@ -1,7 +1,8 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Loader2, Mail, MessageCircle, Send, X } from 'lucide-react'
+import { Mail, MessageCircle, Send } from 'lucide-react'
+import { Button, ModalShell, StatusBadge } from '@/components/ui/primitives'
 
 export type ResendChannel = 'both' | 'email' | 'whatsapp'
 
@@ -64,98 +65,80 @@ export function ResendPassModal({
   ]
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-neutral-950/70 p-3 backdrop-blur-xs sm:items-center sm:p-4">
-      <div className="w-full max-w-sm overflow-hidden rounded-3xl border border-zinc-200 bg-white p-5 shadow-2xl">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h3 className="text-base font-extrabold tracking-tight text-zinc-950">
-              Resend Ticket Pass
-            </h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              <span className="font-semibold text-zinc-800">{bookingCode}</span> · {holderName}
-            </p>
-          </div>
-          <button
+    <ModalShell
+      title="Resend Ticket Pass"
+      badge={<StatusBadge tone="dark">{bookingCode}</StatusBadge>}
+      subtitle={holderName}
+      onClose={onClose}
+      disableClose={submitting}
+      maxWidthClass="max-w-md"
+      footer={
+        <div className="flex gap-2.5">
+          <Button
             type="button"
+            variant="secondary"
             disabled={submitting}
             onClick={onClose}
-            aria-label="Close resend dialog"
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 disabled:opacity-50"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="mt-4 space-y-2">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-            Choose delivery channel
-          </div>
-          {options.map((opt) => {
-            const Icon = opt.icon
-            const selected = channel === opt.key
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                disabled={opt.disabled || submitting}
-                onClick={() => setChannel(opt.key)}
-                className={`flex w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${
-                  selected
-                    ? 'border-zinc-950 bg-zinc-950 text-white shadow-xs'
-                    : 'border-zinc-200 bg-zinc-50/70 text-zinc-900 hover:border-zinc-300 hover:bg-zinc-100/70'
-                }`}
-              >
-                <span
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
-                    selected ? 'bg-white/15 text-white' : 'bg-white text-zinc-600 ring-1 ring-zinc-200'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-bold">{opt.label}</div>
-                  <div
-                    className={`truncate text-[11px] ${
-                      selected ? 'text-zinc-300' : 'text-zinc-500'
-                    }`}
-                  >
-                    {opt.sub}
-                  </div>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="mt-5 flex gap-2">
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={onClose}
-            className="flex-1 rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-xs font-bold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+            className="flex-1"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            disabled={submitting || (!hasEmail && !hasPhone)}
+            variant="primary"
+            loading={submitting}
+            disabled={!hasEmail && !hasPhone}
             onClick={() => onConfirm(channel)}
-            className="inline-flex flex-[1.4] items-center justify-center gap-1.5 rounded-2xl bg-zinc-950 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+            className="flex-[1.4]"
           >
-            {submitting ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Sending…
-              </>
-            ) : (
-              <>
-                <Send className="h-3.5 w-3.5" />
-                Resend Now
-              </>
-            )}
-          </button>
+            {!submitting && <Send className="h-4 w-4" />}
+            {submitting ? 'Sending…' : 'Resend Now'}
+          </Button>
         </div>
+      }
+    >
+      <div className="space-y-2.5">
+        <div className="text-sm font-bold text-neutral-700">
+          Choose how to send the pass
+        </div>
+        {options.map((opt) => {
+          const Icon = opt.icon
+          const selected = channel === opt.key
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              disabled={opt.disabled || submitting}
+              onClick={() => setChannel(opt.key)}
+              className={`flex min-h-14 w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                selected
+                  ? 'border-neutral-900 bg-neutral-900 text-white'
+                  : 'border-neutral-300 bg-white text-neutral-950 hover:bg-neutral-50'
+              }`}
+            >
+              <span
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                  selected
+                    ? 'bg-white/15 text-white'
+                    : 'border border-neutral-200 bg-neutral-50 text-neutral-700'
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-base font-bold">{opt.label}</div>
+                <div
+                  className={`truncate text-sm ${
+                    selected ? 'text-neutral-300' : 'text-neutral-600'
+                  }`}
+                >
+                  {opt.sub}
+                </div>
+              </div>
+            </button>
+          )
+        })}
       </div>
-    </div>
+    </ModalShell>
   )
 }

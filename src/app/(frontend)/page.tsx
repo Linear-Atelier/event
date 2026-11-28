@@ -4,14 +4,14 @@ import { redirect } from 'next/navigation'
 import { getPayload } from 'payload'
 import config from '@payload-config'
 import {
-  ArrowUpRight,
+  ArrowRight,
   Calendar,
   QrCode,
   Ticket,
   Wallet,
 } from 'lucide-react'
 import { getServerUser } from '@/lib/auth'
-import { isScanAllowedForEventDate } from '@/lib/event-date'
+import { isEventPast, isScanAllowedForEventDate } from '@/lib/event-date'
 import { getFinancialYearForDate } from '@/lib/financial-year'
 import { EventCard, type EventListItem } from '@/components/EventCard'
 
@@ -38,10 +38,12 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
     }),
   ])
 
-  const getNetAmt = (b: (typeof bookingsRes.docs)[number]) =>
-    b.status === 'cancelled'
+  const getNetAmt = (b: (typeof bookingsRes.docs)[number]) => {
+    if (b.status === 'pay_at_door' || b.paymentStatus === 'pending') return 0
+    return b.status === 'cancelled'
       ? Math.max(0, (Number(b.paidAmount) || 0) - (Number(b.refundAmount) || 0))
       : b.totalAmount || 0
+  }
 
   const now = new Date()
   const currentFy = getFinancialYearForDate(now)
@@ -56,12 +58,8 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
   })
   const activeFyBookings = fyBookings.filter((b) => b.status !== 'cancelled')
 
-  const cutoffMs = now.getTime() - 24 * 60 * 60 * 1000
-  const upcomingEvents = eventsRes.docs.filter((ev) => {
-    const ms = new Date(ev.date).getTime()
-    return Number.isNaN(ms) || ms >= cutoffMs
-  })
-  const nextEventDoc = upcomingEvents[0] || eventsRes.docs[eventsRes.docs.length - 1] || null
+  const upcomingEvents = eventsRes.docs.filter((ev) => !isEventPast(ev.date, now))
+  const nextEventDoc = upcomingEvents[0] || null
 
   let nextEvent: EventListItem | null = null
   if (nextEventDoc) {
@@ -70,7 +68,6 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
       return evId === nextEventDoc.id
     })
     const activeEvBookings = evBookings.filter((b) => b.status !== 'cancelled')
-    const evMs = new Date(nextEventDoc.date).getTime()
     nextEvent = {
       id: nextEventDoc.id,
       code: nextEventDoc.code,
@@ -80,8 +77,8 @@ async function loadHomeData(user: NonNullable<Awaited<ReturnType<typeof getServe
       color: nextEventDoc.color || 'sky',
       icon: nextEventDoc.icon || null,
       iconSvg: nextEventDoc.iconSvg || null,
-      isPast: !Number.isNaN(evMs) && evMs < cutoffMs,
-      isScanOpen: isScanAllowedForEventDate(nextEventDoc.date),
+      isPast: isEventPast(nextEventDoc.date, now),
+      isScanOpen: isScanAllowedForEventDate(nextEventDoc.date, now),
       bookingCount: activeEvBookings.length,
       totalPax: activeEvBookings.reduce((sum, b) => sum + (b.totalPax || 0), 0),
       totalRevenue: evBookings.reduce((sum, b) => sum + getNetAmt(b), 0),
@@ -106,7 +103,6 @@ export default async function HomePage() {
 
   const { fyCode, eventsCount, totalBookings, totalPax, totalRevenue, nextEvent } =
     await loadHomeData(user)
-  const firstName = (user.name || user.email || 'Committee').split(' ')[0]
 
   const tiles = [
     {
@@ -114,115 +110,99 @@ export default async function HomePage() {
       label: 'Events',
       subtitle: `${eventsCount} in ${fyCode}`,
       icon: Calendar,
-      accent: 'from-neutral-900 via-neutral-900 to-neutral-950',
-      iconBg: 'bg-white/15 text-white',
     },
     {
       href: '/desk',
-      label: 'Booking',
-      subtitle: `${totalBookings} bookings · ${totalPax} pax`,
+      label: 'Book Tickets',
+      subtitle: `${totalBookings} bookings · ${totalPax} guests`,
       icon: Ticket,
-      accent: 'from-neutral-900 via-neutral-900 to-neutral-950',
-      iconBg: 'bg-white/15 text-white',
     },
     {
       href: '/scan',
-      label: 'Gate',
+      label: 'Gate Scan',
       subtitle: 'QR scan & check-in',
       icon: QrCode,
-      accent: 'from-neutral-900 via-neutral-900 to-neutral-950',
-      iconBg: 'bg-white/15 text-white',
     },
     {
       href: '/finance',
       label: 'Finance',
       subtitle: `₹${totalRevenue.toLocaleString('en-IN')} · ${fyCode}`,
       icon: Wallet,
-      accent: 'from-neutral-900 via-neutral-900 to-neutral-950',
-      iconBg: 'bg-white/15 text-white',
     },
   ]
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 pb-8 pt-6">
-      {/* Clean White App Greeting */}
-      <div className="mb-6 flex items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-            AIAIA Cochin Branch
-          </p>
-          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-neutral-950">
-            Hello, {firstName}
-          </h1>
+    <main className="mx-auto w-full max-w-2xl space-y-6 px-4 py-5 sm:px-6">
+      {/* Next Upcoming Event */}
+      <section aria-label="Next Upcoming Event">
+        <div className="mb-2.5 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-bold uppercase tracking-wide text-neutral-700">
+            Next Upcoming Event
+          </h2>
+          <Link
+            href="/events"
+            className="inline-flex min-h-11 items-center gap-1 rounded-xl px-2.5 text-sm font-bold text-neutral-900 transition hover:bg-neutral-200/70"
+          >
+            All events
+            <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
-        {user.roles.includes('super_admin') && (
-          <Link href="/admin" className='inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-200'>Admin Panel</Link>
-        )}
-        {/* {nextEvent && (
-            <Link
-              href={`/events/${nextEvent.id}`}
-              className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-200"
-            >
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              <span className="max-w-[140px] truncate">{nextEvent.code}</span>
-            </Link>
-          )} */}
-      </div>
 
-      {/* 4 Big App Launcher Buttons (2x2 Bento Grid with Frosted Glass Accents) */}
-      <section aria-label="Main Actions" className="grid grid-cols-2 gap-3.5 sm:gap-4">
-        {tiles.map((tile) => {
-          const Icon = tile.icon
-          return (
-            <Link
-              key={tile.href}
-              href={tile.href}
-              className={`group relative flex min-h-[156px] flex-col justify-between overflow-hidden rounded-3xl bg-gradient-to-br ${tile.accent} p-5 text-white shadow-lg transition duration-200 hover:-translate-y-0.5 hover:shadow-xl active:scale-[0.98] sm:min-h-[176px]`}
-            >
-              {/* Subtle glass highlight */}
-              <div className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/5 blur-2xl" />
-
-              <div className="flex items-start justify-between">
-                {/* <div
-                    className={`flex h-12 w-12 items-center justify-center rounded-2xl backdrop-blur-md ${tile.iconBg}`}
-                  >
-                    <Icon className="h-6 w-6" />
-                  </div> */}
-                <ArrowUpRight className="h-4 w-4 text-white/40 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-white" />
-              </div>
-              <Icon className="h-30 w-30 absolute right-2 top-2 opacity-20 stroke-1" />
-
-              <div className="mt-6">
-                <div className="text-xl font-bold tracking-tight text-white">
-                  {tile.label}
-                </div>
-                <div className="mt-0.5 text-xs font-medium text-neutral-300/80">
-                  {tile.subtitle}
-                </div>
-              </div>
-            </Link>
-          )
-        })}
-      </section>
-
-      {/* Next Upcoming Event (Shared EventCard) */}
-      {nextEvent && (
-        <section className="mt-8">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-              Next Upcoming Event
-            </h2>
+        {nextEvent ? (
+          <EventCard event={nextEvent} />
+        ) : (
+          <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-5 py-8 text-center">
+            <Calendar className="mx-auto h-9 w-9 text-neutral-400" />
+            <p className="mt-2.5 text-base font-bold text-neutral-900">
+              No upcoming events scheduled
+            </p>
+            <p className="mt-1 text-sm text-neutral-600">
+              View past events or add a new event in Admin.
+            </p>
             <Link
               href="/events"
-              className="text-xs font-semibold text-neutral-700 hover:text-neutral-900"
+              className="mt-4 inline-flex min-h-12 items-center justify-center rounded-xl border border-neutral-300 bg-white px-4 text-sm font-bold text-neutral-900 transition hover:bg-neutral-100"
             >
-              All events →
+              View All Events
             </Link>
           </div>
+        )}
+      </section>
 
-          <EventCard event={nextEvent} />
-        </section>
-      )}
+      {/* Primary Quick Actions (Clean 2x2 Grid) */}
+      <section aria-label="Main Actions">
+        <h2 className="mb-2.5 text-sm font-bold uppercase tracking-wide text-neutral-700">
+          Quick Actions
+        </h2>
+        <div className="grid grid-cols-2 gap-3">
+          {tiles.map((tile) => {
+            const Icon = tile.icon
+            return (
+              <Link
+                key={tile.href}
+                href={tile.href}
+                className="group flex min-h-[132px] flex-col justify-between rounded-2xl border border-neutral-200 bg-white p-4 transition hover:border-neutral-400 active:bg-neutral-50 sm:p-5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-100 text-neutral-900 transition group-hover:bg-neutral-900 group-hover:text-white">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <ArrowRight className="h-4 w-4 text-neutral-400 transition group-hover:translate-x-0.5 group-hover:text-neutral-900" />
+                </div>
+
+                <div className="mt-4">
+                  <div className="text-lg font-extrabold tracking-tight text-neutral-950">
+                    {tile.label}
+                  </div>
+                  <div className="mt-0.5 text-sm font-medium text-neutral-600 tabular-nums">
+                    {tile.subtitle}
+                  </div>
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      </section>
     </main>
   )
 }

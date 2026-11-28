@@ -9,8 +9,23 @@ import {
   Printer,
   RotateCcw,
   Send,
+  X,
 } from 'lucide-react'
 import { compareFinancialYearCodesDesc } from '@/lib/financial-year'
+import {
+  Button,
+  Card,
+  EmptyState,
+  FieldLabel,
+  ModalShell,
+  PageHeader,
+  SegmentedTabs,
+  SelectInput,
+  StatGrid,
+  StatusBadge,
+  TextInput,
+  buttonClasses,
+} from '@/components/ui/primitives'
 
 export type SettlementStatus =
   | 'with_officer'
@@ -36,7 +51,7 @@ interface FinanceBooking {
   paidAmount?: number
   refundAmount?: number
   refundMethod?: string | null
-  paymentMode: string
+  paymentMode: string | null
   paymentStatus: string
   status: string
   officerName: string
@@ -85,6 +100,10 @@ export function FinanceClient({
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
+  // Modal replacing browser window.prompt for transfer reference note
+  const [transferModalIds, setTransferModalIds] = useState<number[] | null>(null)
+  const [transferRefInput, setTransferRefInput] = useState('')
+
   const eventFyById = useMemo(
     () => new Map(events.map((e) => [e.id, e.fyCode])),
     [events],
@@ -114,7 +133,7 @@ export function FinanceClient({
   const activeScopeLabel = useMemo(() => {
     if (selectedFyCode) return `${selectedFyCode} · All Events`
     const ev = events.find((e) => String(e.id) === selectedFilter)
-    return ev ? `${ev.code} — ${ev.name} (${ev.fyCode})` : `${currentFyCode} · All Events`
+    return ev ? `${ev.code} — ${ev.name}` : `${currentFyCode} · All Events`
   }, [selectedFyCode, selectedFilter, events, currentFyCode])
 
   const scopedBookings = useMemo(
@@ -129,10 +148,21 @@ export function FinanceClient({
     [bookings, selectedFyCode, selectedFilter, eventFyById],
   )
 
+  const doorDueTotals = useMemo(() => {
+    const doorBookings = scopedBookings.filter((b) => b.status === 'pay_at_door')
+    return {
+      doorCount: doorBookings.length,
+      doorDue: doorBookings.reduce((sum, b) => sum + b.totalAmount, 0),
+    }
+  }, [scopedBookings])
+
   const activeBookings = useMemo(
     () =>
       scopedBookings.filter(
-        (b) => b.status !== 'cancelled' || getNetBookingAmount(b) > 0,
+        (b) =>
+          b.status !== 'pay_at_door' &&
+          b.paymentStatus !== 'pending' &&
+          (b.status !== 'cancelled' || getNetBookingAmount(b) > 0),
       ),
     [scopedBookings],
   )
@@ -196,7 +226,6 @@ export function FinanceClient({
         razorpayAmount: number
         cashAmount: number
         upiAmount: number
-        doorAmount: number
         totalAmount: number
         receivedAmount: number
         transferredAmount: number
@@ -212,7 +241,6 @@ export function FinanceClient({
         razorpayAmount: 0,
         cashAmount: 0,
         upiAmount: 0,
-        doorAmount: 0,
         totalAmount: 0,
         receivedAmount: 0,
         transferredAmount: 0,
@@ -224,7 +252,6 @@ export function FinanceClient({
       if (b.paymentMode === 'RAZORPAY') curr.razorpayAmount += amt
       else if (b.paymentMode === 'CASH') curr.cashAmount += amt
       else if (b.paymentMode === 'OFFICER_UPI') curr.upiAmount += amt
-      else if (b.paymentMode === 'PAY_AT_DOOR') curr.doorAmount += amt
 
       if (b.settlementStatus === 'received_by_treasurer') {
         curr.receivedAmount += amt
@@ -253,6 +280,7 @@ export function FinanceClient({
       }
     >()
     for (const b of activeBookings) {
+      if (!b.paymentMode) continue
       const curr = map.get(b.paymentMode) || {
         paymentMode: b.paymentMode,
         bookingCount: 0,
@@ -283,22 +311,18 @@ export function FinanceClient({
     )
   }
 
+  function openTransferModal(ids: number[]) {
+    if (ids.length === 0) return
+    setTransferRefInput('')
+    setTransferModalIds(ids)
+  }
+
   async function runHandoverAction(
     ids: number[],
     action: 'mark_transferred' | 'confirm_received' | 'reset_with_officer',
-    askForRef = false,
+    transferReference?: string,
   ) {
     if (ids.length === 0) return
-
-    let transferReference: string | undefined
-    if (askForRef) {
-      const input = window.prompt(
-        'Optional UPI Ref # or Cash Handover Note (leave blank to skip):',
-        '',
-      )
-      if (input === null) return // user cancelled prompt
-      transferReference = input.trim() || undefined
-    }
 
     setSubmitting(true)
     setMessage(null)
@@ -307,7 +331,11 @@ export function FinanceClient({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ bookingIds: ids, action, transferReference }),
+        body: JSON.stringify({
+          bookingIds: ids,
+          action,
+          transferReference: transferReference?.trim() || undefined,
+        }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -316,6 +344,7 @@ export function FinanceClient({
       }
 
       const nowIso = data.timestamp || new Date().toISOString()
+      const cleanRef = transferReference?.trim() || null
       setBookings((prev) =>
         prev.map((b) => {
           if (!ids.includes(b.id)) return b
@@ -324,7 +353,7 @@ export function FinanceClient({
               ...b,
               settlementStatus: 'transferred_to_treasurer',
               transferredAt: nowIso,
-              transferReference: transferReference || b.transferReference || null,
+              transferReference: cleanRef || b.transferReference || null,
             }
           }
           if (action === 'confirm_received') {
@@ -344,13 +373,14 @@ export function FinanceClient({
         }),
       )
       setSelectedIds([])
+      setTransferModalIds(null)
 
       const label =
         action === 'mark_transferred'
-          ? 'marked as Transferred to Treasurer (awaiting receipt)'
+          ? 'marked as Sent to Treasurer'
           : action === 'confirm_received'
             ? 'confirmed as Received by Treasurer'
-            : 'reset to With Officer'
+            : 'moved back to With Officer'
       setMessage(`${ids.length} booking(s) ${label}.`)
     } finally {
       setSubmitting(false)
@@ -364,163 +394,180 @@ export function FinanceClient({
   const canInteract = canMarkTransferred || canConfirmReceived
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-bold text-neutral-900">
-              Treasurer Finance &amp; Handover Tracking
-            </h1>
-            <span className="rounded-full bg-neutral-100 px-2.5 py-0.5 text-[11px] font-bold text-neutral-700">
-              {activeScopeLabel}
-            </span>
-          </div>
-          <p className="text-sm text-neutral-600">
-            Track collected funds from Booking Officers to Treasurer receipt, plus AGM Excel/PDF exports.
-          </p>
-        </div>
+    <div className="space-y-5">
 
-        <div className="no-print flex flex-wrap items-center gap-2">
-          <select
-            value={selectedFilter}
-            onChange={(e) => {
-              setSelectedFilter(e.target.value)
-              setSelectedIds([])
-            }}
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-800"
-          >
-            <optgroup label="Financial Cycle (Apr – Mar)">
-              {availableFys.map((fy) => (
-                <option key={fy} value={`fy:${fy}`}>
-                  {fy} · All Events
-                </option>
-              ))}
-            </optgroup>
-            {availableFys.map((fy) => {
-              const fyEvents = eventsByFy.get(fy) || []
-              if (fyEvents.length === 0) return null
-              return (
-                <optgroup key={`events-${fy}`} label={`${fy} Events`}>
-                  {fyEvents.map((ev) => (
-                    <option key={ev.id} value={String(ev.id)}>
-                      {ev.code} — {ev.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )
-            })}
-          </select>
-
-          <a
-            href={exportHref}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
-          >
-            <Download className="h-4 w-4" />
-            Export Excel (.xlsx)
-          </a>
-
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50"
-          >
-            <Printer className="h-4 w-4" />
-            Print / Save PDF
-          </button>
-        </div>
+      {/* Scope Filter */}
+      <div className="no-print">
+        <FieldLabel htmlFor="finance-scope">Financial Year or Event</FieldLabel>
+        <SelectInput
+          id="finance-scope"
+          value={selectedFilter}
+          onChange={(e) => {
+            setSelectedFilter(e.target.value)
+            setSelectedIds([])
+          }}
+        >
+          <optgroup label="Financial Year (Apr – Mar)">
+            {availableFys.map((fy) => (
+              <option key={fy} value={`fy:${fy}`}>
+                {fy} · All Events
+              </option>
+            ))}
+          </optgroup>
+          {availableFys.map((fy) => {
+            const fyEvents = eventsByFy.get(fy) || []
+            if (fyEvents.length === 0) return null
+            return (
+              <optgroup key={`events-${fy}`} label={`${fy} Events`}>
+                {fyEvents.map((ev) => (
+                  <option key={ev.id} value={String(ev.id)}>
+                    {ev.code} — {ev.name}
+                  </option>
+                ))}
+              </optgroup>
+            )
+          })}
+        </SelectInput>
+      </div>
+      <div className='flex gap-4'>
+        <a
+          href={exportHref}
+          className={buttonClasses({ variant: 'success', size: 'md' })}
+        >
+          <Download className="h-4 w-4" />
+          Export Excel
+        </a>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => window.print()}
+        >
+          <Printer className="h-4 w-4" />
+          Print / PDF
+        </Button>
       </div>
 
-      {/* Dark Frosted Glass Handover Summary Banner */}
-      <div className="glass-surface rounded-3xl p-5 text-white shadow-xl">
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <div>
-            <div className="text-[11px] font-medium text-neutral-300">Net Revenue</div>
-            <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
-              ₹{totals.gross.toLocaleString('en-IN')}
-            </div>
-            <div className="mt-0.5 text-[11px] text-neutral-400">
-              {totals.count} active
-              {totals.refunded > 0
-                ? ` · ₹${totals.refunded.toLocaleString('en-IN')} refunded`
-                : ' bookings'}
-            </div>
-          </div>
+      {/* Summary Metrics */}
+      <StatGrid
+        items={[
+          {
+            label: 'Net Revenue',
+            value: `₹${totals.gross.toLocaleString('en-IN')}`,
+            sub: `${totals.count} paid${
+              doorDueTotals.doorDue > 0
+                ? ` · +₹${doorDueTotals.doorDue.toLocaleString('en-IN')} at door`
+                : ''
+            }${totals.refunded > 0 ? ` · ₹${totals.refunded.toLocaleString('en-IN')} ref` : ''}`,
+          },
+          {
+            label: 'With Officers',
+            value: `₹${totals.withOfficer.toLocaleString('en-IN')}`,
+            sub: `${totals.withOfficerCount} not yet sent`,
+            tone: 'amber',
+          },
+          {
+            label: 'Sent to Treasurer',
+            value: `₹${totals.transferred.toLocaleString('en-IN')}`,
+            sub: `${totals.transferredCount} awaiting receipt`,
+          },
+          {
+            label: 'Received',
+            value: `₹${totals.received.toLocaleString('en-IN')}`,
+            sub: `${totals.receivedCount} settled`,
+            tone: 'emerald',
+          },
+        ]}
+      />
 
-          <div>
-            <div className="text-[11px] font-medium text-amber-300">With Officers</div>
-            <div className="mt-1 text-2xl font-extrabold tracking-tight text-amber-300">
-              ₹{totals.withOfficer.toLocaleString('en-IN')}
-            </div>
-            <div className="mt-0.5 text-[11px] text-neutral-300">
-              {totals.withOfficerCount} not yet transferred
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[11px] font-medium text-white">Sent to Treasurer</div>
-            <div className="mt-1 text-2xl font-extrabold tracking-tight text-white">
-              ₹{totals.transferred.toLocaleString('en-IN')}
-            </div>
-            <div className="mt-0.5 text-[11px] text-neutral-300">
-              {totals.transferredCount} awaiting receipt
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[11px] font-medium text-emerald-300">
-              Received by Treasurer
-            </div>
-            <div className="mt-1 text-2xl font-extrabold tracking-tight text-emerald-300">
-              ₹{totals.received.toLocaleString('en-IN')}
-            </div>
-            <div className="mt-0.5 text-[11px] text-neutral-300">
-              {totals.receivedCount} settled
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Officer Cash Reconciliation & Payment Modes (Borderless White Sections) */}
-      <div className="grid gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <h2 className="text-sm font-bold text-neutral-900">
+      {/* Officer Reconciliation & Payment Modes */}
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <h2 className="text-base font-extrabold text-neutral-950">
             Officer-Wise Cash &amp; UPI Reconciliation
           </h2>
-          <div className="mt-3 overflow-x-auto">
-            <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
-              <thead className="bg-neutral-50 text-[11px] font-semibold uppercase text-neutral-500">
+
+          {/* Mobile Officer Cards */}
+          <div className="mt-3.5 space-y-3 md:hidden">
+            {officerRows.length === 0 ? (
+              <p className="py-4 text-sm text-neutral-600">No collections recorded yet.</p>
+            ) : (
+              officerRows.map((o, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-xl border border-neutral-200 bg-neutral-50 p-3.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-base font-extrabold text-neutral-950">
+                        {o.officerName}
+                      </div>
+                      <div className="text-sm text-neutral-600">
+                        {o.bookingCount} {o.bookingCount === 1 ? 'booking' : 'bookings'}
+                      </div>
+                    </div>
+                    <div className="text-right text-lg font-extrabold text-neutral-950 tabular-nums">
+                      ₹{o.totalAmount.toLocaleString('en-IN')}
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-neutral-200 pt-2.5 text-sm text-neutral-700 tabular-nums">
+                    {o.razorpayAmount > 0 && (
+                      <span>Razorpay: ₹{o.razorpayAmount.toLocaleString('en-IN')}</span>
+                    )}
+                    <span>Cash: ₹{o.cashAmount.toLocaleString('en-IN')}</span>
+                    <span>UPI: ₹{o.upiAmount.toLocaleString('en-IN')}</span>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm font-bold tabular-nums">
+                    <span className="text-emerald-700">
+                      Received: ₹{o.receivedAmount.toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-neutral-800">
+                      Sent: ₹{o.transferredAmount.toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-amber-700">
+                      With Officer: ₹{o.withOfficerAmount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Officer Table */}
+          <div className="mt-3 hidden overflow-x-auto md:block">
+            <table className="min-w-full divide-y divide-neutral-200 text-left text-sm">
+              <thead className="bg-neutral-50 text-xs font-bold uppercase text-neutral-600">
                 <tr>
-                  <th className="px-3 py-2">Officer</th>
-                  <th className="px-3 py-2">Bookings</th>
-                  <th className="px-3 py-2">Total</th>
-                  <th className="px-3 py-2">Treasurer Handover</th>
+                  <th className="px-3 py-3">Officer</th>
+                  <th className="px-3 py-3">Bookings</th>
+                  <th className="px-3 py-3">Total &amp; Split</th>
+                  <th className="px-3 py-3">Treasurer Handover</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100">
+              <tbody className="divide-y divide-neutral-200">
                 {officerRows.map((o, idx) => (
                   <tr key={idx} className="align-top">
-                    <td className="px-3 py-2.5 font-semibold text-neutral-900">{o.officerName}</td>
-                    <td className="px-3 py-2.5">{o.bookingCount}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="font-bold text-neutral-900">
+                    <td className="px-3 py-3 font-bold text-neutral-950">{o.officerName}</td>
+                    <td className="px-3 py-3 tabular-nums">{o.bookingCount}</td>
+                    <td className="px-3 py-3 tabular-nums">
+                      <div className="font-extrabold text-neutral-950">
                         ₹{o.totalAmount.toLocaleString('en-IN')}
                       </div>
-                      <div className="mt-0.5 space-y-0.5 text-[11px] text-neutral-500">
+                      <div className="mt-0.5 space-y-0.5 text-xs font-medium text-neutral-600">
                         {o.razorpayAmount > 0 && (
                           <div>Razorpay: ₹{o.razorpayAmount.toLocaleString('en-IN')}</div>
                         )}
                         <div>Cash: ₹{o.cashAmount.toLocaleString('en-IN')}</div>
                         <div>UPI: ₹{o.upiAmount.toLocaleString('en-IN')}</div>
-                        <div>Door: ₹{o.doorAmount.toLocaleString('en-IN')}</div>
                       </div>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-3 py-3 tabular-nums">
                       <div className="font-bold text-emerald-700">
                         Received: ₹{o.receivedAmount.toLocaleString('en-IN')}
                       </div>
-                      <div className="mt-0.5 space-y-0.5 text-[11px]">
-                        <div className="text-neutral-900">
+                      <div className="mt-0.5 space-y-0.5 text-xs font-semibold">
+                        <div className="text-neutral-800">
                           Sent: ₹{o.transferredAmount.toLocaleString('en-IN')}
                         </div>
                         <div className="text-amber-700">
@@ -532,7 +579,7 @@ export function FinanceClient({
                 ))}
                 {officerRows.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-neutral-400">
+                    <td colSpan={4} className="px-3 py-8 text-center text-sm text-neutral-600">
                       No collections recorded yet.
                     </td>
                   </tr>
@@ -540,191 +587,348 @@ export function FinanceClient({
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
 
-        <div className="ticket-perforation pt-6 lg:border-t-0 lg:pt-0">
-          <h2 className="text-sm font-bold text-neutral-900">Payment Mode Breakdown</h2>
-          <div className="mt-3 space-y-2.5">
-            {modeRows.map((m) => (
-              <div
-                key={m.paymentMode}
-                className="flex items-center justify-between rounded-2xl bg-neutral-50/80 px-4 py-3 text-xs"
-              >
-                <div>
-                  <div className="font-bold text-neutral-900">{m.paymentMode}</div>
-                  <div className="text-[11px] text-neutral-500">
-                    {m.bookingCount} bookings · {m.totalPax} pax
+        <Card>
+          <h2 className="text-base font-extrabold text-neutral-950">Payment Modes</h2>
+          <div className="mt-3.5 space-y-2.5">
+            {modeRows.length === 0 ? (
+              <p className="py-4 text-sm text-neutral-600">No payments yet.</p>
+            ) : (
+              modeRows.map((m) => (
+                <div
+                  key={m.paymentMode}
+                  className="flex items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-3"
+                >
+                  <div>
+                    <div className="text-sm font-extrabold text-neutral-950">
+                      {m.paymentMode}
+                    </div>
+                    <div className="text-xs font-medium text-neutral-600">
+                      {m.bookingCount} bookings · {m.totalPax} guests
+                    </div>
+                  </div>
+                  <div className="text-right tabular-nums">
+                    <div className="text-base font-extrabold text-neutral-950">
+                      ₹{m.totalAmount.toLocaleString('en-IN')}
+                    </div>
+                    <div className="text-xs font-bold text-emerald-700">
+                      ₹{m.receivedAmount.toLocaleString('en-IN')} received
+                    </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="font-bold text-neutral-900">
-                    ₹{m.totalAmount.toLocaleString('en-IN')}
-                  </div>
-                  <div className="text-[11px] text-emerald-700">
-                    ₹{m.receivedAmount.toLocaleString('en-IN')} received
-                  </div>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
-        </div>
+        </Card>
       </div>
 
-      {/* 2-Step Treasurer Handover Queue */}
-      <div className="ticket-perforation pt-6">
-        <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="flex items-center gap-1.5 text-sm font-bold text-neutral-900">
-              <ArrowRightLeft className="h-4 w-4 text-neutral-700" />
-              Treasurer Transfer Queue
-            </h2>
-            <div className="inline-flex flex-wrap gap-1 rounded-2xl bg-neutral-100/90 p-1 text-xs">
-              {(
-                [
-                  { key: 'with_officer', label: `With Officer (${totals.withOfficerCount})` },
-                  {
-                    key: 'transferred_to_treasurer',
-                    label: `Sent (${totals.transferredCount})`,
-                  },
-                  { key: 'received_by_treasurer', label: `Received (${totals.receivedCount})` },
-                  { key: 'all', label: 'All' },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => {
-                    setFilterStatus(tab.key)
-                    setSelectedIds([])
-                  }}
-                  className={`rounded-xl px-3 py-1.5 font-bold transition ${
-                    filterStatus === tab.key
-                      ? 'bg-white text-neutral-950 shadow-xs'
-                      : 'text-neutral-500 hover:text-neutral-900'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* Treasurer Transfer Queue */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-lg font-extrabold text-neutral-950">
+            <ArrowRightLeft className="h-5 w-5 text-neutral-700" />
+            Treasurer Transfer Queue
+          </h2>
+        </div>
 
-          {selectedIds.length > 0 && (
+        <div className="no-print">
+          <SegmentedTabs
+            value={filterStatus}
+            onChange={(next) => {
+              setFilterStatus(next)
+              setSelectedIds([])
+            }}
+            items={[
+              { key: 'with_officer', label: `With Officer (${totals.withOfficerCount})` },
+              { key: 'transferred_to_treasurer', label: `Sent (${totals.transferredCount})` },
+              { key: 'received_by_treasurer', label: `Received (${totals.receivedCount})` },
+              { key: 'all', label: 'All' },
+            ]}
+          />
+        </div>
+
+        {selectedIds.length > 0 && (
+          <div className="no-print flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-neutral-300 bg-white p-3.5">
+            <span className="text-sm font-bold text-neutral-900">
+              {selectedIds.length} booking{selectedIds.length === 1 ? '' : 's'} selected
+            </span>
             <div className="flex flex-wrap gap-2">
               {canMarkTransferred && filterStatus === 'with_officer' && (
-                <button
+                <Button
                   type="button"
+                  variant="primary"
+                  size="sm"
                   disabled={submitting}
-                  onClick={() => runHandoverAction(selectedIds, 'mark_transferred', true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
+                  onClick={() => openTransferModal(selectedIds)}
                 >
-                  <Send className="h-3.5 w-3.5" />
-                  Mark Transferred ({selectedIds.length})
-                </button>
+                  <Send className="h-4 w-4" />
+                  Mark Sent ({selectedIds.length})
+                </Button>
               )}
               {canConfirmReceived && filterStatus !== 'received_by_treasurer' && (
-                <button
+                <Button
                   type="button"
-                  disabled={submitting}
-                  onClick={() => runHandoverAction(selectedIds, 'confirm_received', false)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  variant="success"
+                  size="sm"
+                  loading={submitting}
+                  onClick={() => runHandoverAction(selectedIds, 'confirm_received')}
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   Confirm Received ({selectedIds.length})
-                </button>
+                </Button>
               )}
             </div>
-          )}
-        </div>
-
-        {message && (
-          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-900">
-            {message}
           </div>
         )}
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-neutral-200 text-left text-xs">
-            <thead className="bg-neutral-50 text-[11px] font-semibold uppercase text-neutral-500">
+        {message && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-950">
+            <span>{message}</span>
+            <button
+              type="button"
+              onClick={() => setMessage(null)}
+              aria-label="Dismiss message"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-emerald-800 hover:bg-emerald-100"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        )}
+
+        {/* Mobile Transfer Queue Cards */}
+        <div className="space-y-3 md:hidden">
+          {filteredBookings.length === 0 ? (
+            <EmptyState
+              icon={ArrowRightLeft}
+              title="No bookings in this stage"
+              description="Switch tabs above to view other handover stages."
+            />
+          ) : (
+            filteredBookings.map((b) => {
+              const selectable = canInteract && b.settlementStatus !== 'received_by_treasurer'
+              const isChecked = selectedIds.includes(b.id)
+              return (
+                <div
+                  key={b.id}
+                  className={`overflow-hidden rounded-2xl border bg-white ${isChecked ? 'border-neutral-900 ring-1 ring-neutral-900' : 'border-neutral-200'
+                    }`}
+                >
+                  <div className="p-4">
+                    <div className="flex items-start gap-3">
+                      {selectable && (
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleSelect(b.id)}
+                          aria-label={`Select booking ${b.bookingCode}`}
+                          className="no-print mt-0.5 h-6 w-6 shrink-0 rounded accent-neutral-900"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-base font-extrabold text-neutral-950">
+                              {b.holderName}
+                            </div>
+                            <div className="text-sm font-semibold text-neutral-700 tabular-nums">
+                              {b.bookingCode} · {b.phone}
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-right tabular-nums">
+                            <div className="text-base font-extrabold text-neutral-950">
+                              ₹{b.totalAmount.toLocaleString('en-IN')}
+                            </div>
+                            <div className="text-xs font-bold text-neutral-600">
+                              {b.paymentMode}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <span className="font-medium text-neutral-700">
+                            By {b.officerName} · {b.totalPax} guests
+                          </span>
+                          {b.settlementStatus === 'received_by_treasurer' ? (
+                            <StatusBadge tone="emerald">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Received
+                            </StatusBadge>
+                          ) : b.settlementStatus === 'transferred_to_treasurer' ? (
+                            <StatusBadge tone="neutral">
+                              <Send className="h-3.5 w-3.5" />
+                              Sent
+                            </StatusBadge>
+                          ) : (
+                            <StatusBadge tone="amber">
+                              <Clock className="h-3.5 w-3.5" />
+                              With Officer
+                            </StatusBadge>
+                          )}
+                        </div>
+
+                        {b.transferReference && (
+                          <div className="mt-2 rounded-lg bg-neutral-50 px-2.5 py-1.5 text-xs font-semibold text-neutral-700">
+                            Ref: {b.transferReference}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {canInteract && (
+                    <div className="no-print flex flex-wrap gap-2 border-t border-neutral-200 bg-neutral-50 p-2.5">
+                      {b.settlementStatus === 'with_officer' && canMarkTransferred && (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          disabled={submitting}
+                          onClick={() => openTransferModal([b.id])}
+                          className="flex-1"
+                        >
+                          <Send className="h-4 w-4" />
+                          Mark Sent
+                        </Button>
+                      )}
+                      {b.settlementStatus === 'transferred_to_treasurer' &&
+                        canConfirmReceived && (
+                          <Button
+                            type="button"
+                            variant="success"
+                            size="sm"
+                            disabled={submitting}
+                            onClick={() => runHandoverAction([b.id], 'confirm_received')}
+                            className="flex-1"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            Confirm Received
+                          </Button>
+                        )}
+                      {b.settlementStatus === 'transferred_to_treasurer' &&
+                        canMarkTransferred && (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={submitting}
+                            onClick={() => runHandoverAction([b.id], 'reset_with_officer')}
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Undo
+                          </Button>
+                        )}
+                      {b.settlementStatus === 'received_by_treasurer' &&
+                        canConfirmReceived && (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={submitting}
+                            onClick={() => runHandoverAction([b.id], 'reset_with_officer')}
+                            className="flex-1"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Revert to Officer
+                          </Button>
+                        )}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {/* Desktop Transfer Queue Table */}
+        <Card className="hidden overflow-x-auto p-0 md:block">
+          <table className="min-w-full divide-y divide-neutral-200 text-left text-sm">
+            <thead className="bg-neutral-50 text-xs font-bold uppercase text-neutral-600">
               <tr>
-                {canInteract && <th className="no-print w-8 px-3 py-2.5" />}
-                <th className="px-3 py-2.5">Code</th>
-                <th className="px-3 py-2.5">Booking</th>
-                <th className="px-3 py-2.5">Pax</th>
-                <th className="px-3 py-2.5">Amount</th>
-                <th className="px-3 py-2.5">Collected By</th>
-                <th className="px-3 py-2.5">Handover Status</th>
-                {canInteract && <th className="no-print px-3 py-2.5">Action</th>}
+                {canInteract && <th className="no-print w-10 px-4 py-3.5" />}
+                <th className="px-4 py-3.5">Code</th>
+                <th className="px-4 py-3.5">Booking</th>
+                <th className="px-4 py-3.5">Guests</th>
+                <th className="px-4 py-3.5">Amount</th>
+                <th className="px-4 py-3.5">Collected By</th>
+                <th className="px-4 py-3.5">Status</th>
+                {canInteract && <th className="no-print px-4 py-3.5">Action</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
+            <tbody className="divide-y divide-neutral-200">
               {filteredBookings.map((b) => (
                 <tr key={b.id}>
                   {canInteract && (
-                    <td className="no-print px-3 py-2.5">
+                    <td className="no-print px-4 py-3.5">
                       {b.settlementStatus !== 'received_by_treasurer' && (
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(b.id)}
                           onChange={() => toggleSelect(b.id)}
+                          className="h-5 w-5 rounded accent-neutral-900"
                         />
                       )}
                     </td>
                   )}
-                  <td className="px-3 py-2.5 font-bold text-neutral-900">{b.bookingCode}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="font-medium text-neutral-900">{b.holderName}</div>
-                    <div className="text-[11px] text-neutral-500">{b.phone}</div>
+                  <td className="px-4 py-3.5 font-bold text-neutral-950">{b.bookingCode}</td>
+                  <td className="px-4 py-3.5">
+                    <div className="font-bold text-neutral-950">{b.holderName}</div>
+                    <div className="text-xs font-medium text-neutral-600 tabular-nums">
+                      {b.phone}
+                    </div>
                   </td>
-                  <td className="px-3 py-2.5">{b.totalPax}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="font-bold text-neutral-900">
+                  <td className="px-4 py-3.5 tabular-nums">{b.totalPax}</td>
+                  <td className="px-4 py-3.5 tabular-nums">
+                    <div className="font-extrabold text-neutral-950">
                       ₹{b.totalAmount.toLocaleString('en-IN')}
                     </div>
-                    <div className="text-[10px] text-neutral-500">{b.paymentMode}</div>
+                    <div className="text-xs font-semibold text-neutral-600">{b.paymentMode}</div>
                   </td>
-                  <td className="px-3 py-2.5 text-neutral-700">{b.officerName}</td>
-                  <td className="px-3 py-2.5">
+                  <td className="px-4 py-3.5 font-medium text-neutral-800">{b.officerName}</td>
+                  <td className="px-4 py-3.5">
                     {b.settlementStatus === 'received_by_treasurer' ? (
                       <div>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                          <CheckCircle2 className="h-3 w-3" /> Received by Treasurer
-                        </span>
+                        <StatusBadge tone="emerald">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Received
+                        </StatusBadge>
                         {b.transferReference && (
-                          <div className="mt-0.5 text-[10px] text-neutral-500">
+                          <div className="mt-1 text-xs text-neutral-600">
                             Ref: {b.transferReference}
                           </div>
                         )}
                       </div>
                     ) : b.settlementStatus === 'transferred_to_treasurer' ? (
                       <div>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200/80 px-2 py-0.5 text-[10px] font-bold text-neutral-800">
-                          <Send className="h-3 w-3" /> Sent to Treasurer
-                        </span>
+                        <StatusBadge tone="neutral">
+                          <Send className="h-3.5 w-3.5" />
+                          Sent
+                        </StatusBadge>
                         {b.transferReference && (
-                          <div className="mt-0.5 text-[10px] text-neutral-500">
+                          <div className="mt-1 text-xs text-neutral-600">
                             Ref: {b.transferReference}
                           </div>
                         )}
                       </div>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                        <Clock className="h-3 w-3" /> With Officer
-                      </span>
+                      <StatusBadge tone="amber">
+                        <Clock className="h-3.5 w-3.5" />
+                        With Officer
+                      </StatusBadge>
                     )}
                   </td>
                   {canInteract && (
-                    <td className="no-print px-3 py-2.5">
-                      <div className="flex flex-wrap items-center gap-1.5">
+                    <td className="no-print px-4 py-3.5">
+                      <div className="flex flex-wrap items-center gap-2">
                         {b.settlementStatus === 'with_officer' && canMarkTransferred && (
                           <button
                             type="button"
                             disabled={submitting}
-                            onClick={() => runHandoverAction([b.id], 'mark_transferred', true)}
-                            className="inline-flex items-center gap-1 rounded bg-neutral-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
+                            onClick={() => openTransferModal([b.id])}
+                            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-neutral-900 px-3 text-xs font-bold text-white hover:bg-neutral-800 disabled:opacity-50"
                           >
-                            <Send className="h-3 w-3" />
-                            Mark Transferred
+                            <Send className="h-3.5 w-3.5" />
+                            Mark Sent
                           </button>
                         )}
                         {b.settlementStatus === 'transferred_to_treasurer' &&
@@ -732,10 +936,10 @@ export function FinanceClient({
                             <button
                               type="button"
                               disabled={submitting}
-                              onClick={() => runHandoverAction([b.id], 'confirm_received', false)}
-                              className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                              onClick={() => runHandoverAction([b.id], 'confirm_received')}
+                              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-3 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
                             >
-                              <CheckCircle2 className="h-3 w-3" />
+                              <CheckCircle2 className="h-3.5 w-3.5" />
                               Confirm Received
                             </button>
                           )}
@@ -744,13 +948,11 @@ export function FinanceClient({
                             <button
                               type="button"
                               disabled={submitting}
-                              onClick={() =>
-                                runHandoverAction([b.id], 'reset_with_officer', false)
-                              }
-                              className="inline-flex items-center gap-1 rounded border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-50"
+                              onClick={() => runHandoverAction([b.id], 'reset_with_officer')}
+                              className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-neutral-300 bg-white px-2.5 text-xs font-bold text-neutral-800 hover:bg-neutral-100"
                               title="Move back to With Officer"
                             >
-                              <RotateCcw className="h-3 w-3" />
+                              <RotateCcw className="h-3.5 w-3.5" />
                             </button>
                           )}
                         {b.settlementStatus === 'received_by_treasurer' &&
@@ -758,10 +960,8 @@ export function FinanceClient({
                             <button
                               type="button"
                               disabled={submitting}
-                              onClick={() =>
-                                runHandoverAction([b.id], 'reset_with_officer', false)
-                              }
-                              className="rounded border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-50"
+                              onClick={() => runHandoverAction([b.id], 'reset_with_officer')}
+                              className="inline-flex min-h-10 items-center rounded-xl border border-neutral-300 bg-white px-3 text-xs font-bold text-neutral-800 hover:bg-neutral-100"
                             >
                               Revert
                             </button>
@@ -775,7 +975,7 @@ export function FinanceClient({
                 <tr>
                   <td
                     colSpan={canInteract ? 8 : 6}
-                    className="px-3 py-8 text-center text-neutral-400"
+                    className="px-4 py-10 text-center text-sm text-neutral-600"
                   >
                     No bookings in this stage.
                   </td>
@@ -783,8 +983,58 @@ export function FinanceClient({
               )}
             </tbody>
           </table>
-        </div>
+        </Card>
       </div>
+
+      {/* Handover Reference Modal (replaces window.prompt) */}
+      {transferModalIds && (
+        <ModalShell
+          title="Mark as Sent to Treasurer"
+          subtitle={`Marking ${transferModalIds.length} booking${transferModalIds.length === 1 ? '' : 's'} as transferred.`}
+          onClose={() => setTransferModalIds(null)}
+          disableClose={submitting}
+          maxWidthClass="max-w-md"
+          footer={
+            <div className="flex gap-2.5">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={submitting}
+                onClick={() => setTransferModalIds(null)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                loading={submitting}
+                onClick={() =>
+                  runHandoverAction(transferModalIds, 'mark_transferred', transferRefInput)
+                }
+                className="flex-[1.5]"
+              >
+                {!submitting && <Send className="h-4 w-4" />}
+                Confirm Handover
+              </Button>
+            </div>
+          }
+        >
+          <div>
+            <FieldLabel htmlFor="transfer-ref">
+              UPI Reference # or Cash Note (Optional)
+            </FieldLabel>
+            <TextInput
+              id="transfer-ref"
+              type="text"
+              autoFocus
+              value={transferRefInput}
+              onChange={(e) => setTransferRefInput(e.target.value)}
+              placeholder="e.g. UPI Ref 412345678 or Handed cash to Treasurer"
+            />
+          </div>
+        </ModalShell>
+      )}
     </div>
   )
 }

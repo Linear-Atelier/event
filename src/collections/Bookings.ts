@@ -195,9 +195,9 @@ export const Bookings: CollectionConfig = {
       defaultValue: 'confirmed',
       options: [
         { label: 'Confirmed', value: 'confirmed' },
+        { label: 'Pay at Door', value: 'pay_at_door' },
         { label: 'Pending Payment', value: 'pending_payment' },
         { label: 'Cancelled', value: 'cancelled' },
-        { label: 'Transferred', value: 'transferred' },
       ],
       admin: {
         position: 'sidebar',
@@ -223,17 +223,22 @@ export const Bookings: CollectionConfig = {
     {
       name: 'paymentMode',
       type: 'select',
-      required: true,
-      defaultValue: 'CASH',
+      required: false,
       options: [
         { label: 'Razorpay', value: 'RAZORPAY' },
         { label: 'Cash', value: 'CASH' },
         { label: 'Officer UPI', value: 'OFFICER_UPI' },
         { label: 'Complimentary', value: 'COMPLIMENTARY' },
-        { label: 'Pay at Door', value: 'PAY_AT_DOOR' },
       ],
+      validate: (value: unknown, { siblingData }: { siblingData?: Record<string, unknown> }) => {
+        if (siblingData?.paymentStatus === 'paid' && !value) {
+          return 'Payment mode is required when payment status is Paid.'
+        }
+        return true
+      },
       admin: {
         position: 'sidebar',
+        description: 'Empty while booking is Pay at Door; populated once payment is collected.',
       },
       access: {
         update: fieldBookingOfficerOrAdminUpdate,

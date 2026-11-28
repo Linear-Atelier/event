@@ -18,7 +18,7 @@ export async function POST(
     const { id } = await context.params
     const bookingId = Number(id)
     const body = await request.json()
-    const status = body.status as 'confirmed' | 'cancelled' | 'transferred'
+    const status = body.status as 'confirmed' | 'pay_at_door' | 'cancelled'
     const holderName = body.holderName ? String(body.holderName).trim() : undefined
     const phone = body.phone ? String(body.phone).trim() : undefined
     const email = body.email !== undefined ? String(body.email || '').trim() : undefined

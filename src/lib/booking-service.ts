@@ -30,7 +30,8 @@ export interface CreateBookingInput {
   holderName: string
   phone: string
   email?: string | null
-  paymentMode: 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'PAY_AT_DOOR'
+  payAtDoor?: boolean
+  paymentMode?: 'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | null
   paymentStatus?: 'paid' | 'pending' | 'refunded'
   notes?: string
   tickets: TicketSelectionInput[]
@@ -354,19 +355,27 @@ export async function createFullBooking(input: CreateBookingInput) {
     }
   }
 
-  if (input.paymentMode !== 'COMPLIMENTARY') {
+  const isPayAtDoor = Boolean(input.payAtDoor) || !input.paymentMode
+  const isComplimentary = !isPayAtDoor && input.paymentMode === 'COMPLIMENTARY'
+
+  if (!isComplimentary) {
     totalAmount += tablesTotal
   }
 
   const bookingCode = await generateNextBookingCode(payload, eventDoc.id, eventDoc.code)
-  const isRazorpayPending = input.paymentMode === 'RAZORPAY' && totalAmount > 0
+  const isRazorpayPending = !isPayAtDoor && input.paymentMode === 'RAZORPAY' && totalAmount > 0
   const paymentExpiresAt = isRazorpayPending
     ? new Date(Date.now() + RAZORPAY_HOLD_MINUTES * 60 * 1000).toISOString()
     : undefined
   const effectivePaymentStatus =
-    input.paymentStatus ||
-    (isRazorpayPending || input.paymentMode === 'PAY_AT_DOOR' ? 'pending' : 'paid')
+    input.paymentStatus || (isRazorpayPending || isPayAtDoor ? 'pending' : 'paid')
   const effectivePaidAmount = effectivePaymentStatus === 'paid' ? totalAmount : 0
+  const effectiveStatus = isRazorpayPending
+    ? 'pending_payment'
+    : isPayAtDoor
+      ? 'pay_at_door'
+      : 'confirmed'
+  const effectivePaymentMode = isPayAtDoor ? null : (input.paymentMode ?? 'CASH')
 
   // Create Booking respecting user's RBAC
   const booking = await payload.create({
@@ -383,9 +392,9 @@ export async function createFullBooking(input: CreateBookingInput) {
       totalPax,
       totalAmount,
       paidAmount: effectivePaidAmount,
-      status: isRazorpayPending ? 'pending_payment' : 'confirmed',
+      status: effectiveStatus,
       notes: input.notes?.trim() || undefined,
-      paymentMode: input.paymentMode,
+      paymentMode: effectivePaymentMode,
       paymentStatus: effectivePaymentStatus,
       collectedByOfficer: user.id,
       settlementStatus: 'with_officer',

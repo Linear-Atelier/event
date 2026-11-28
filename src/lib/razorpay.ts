@@ -381,60 +381,62 @@ export async function finalizeRazorpayBookingPayment(
     },
   })) as Booking
 
-  // Load event, tickets, and tables to dispatch the Master QR Ticket Pass (WhatsApp + Email)
-  const eventDoc =
-    typeof existing.event === 'object' && existing.event !== null
-      ? (existing.event as Event)
-      : ((await payload.findByID({
-          collection: 'events',
-          id: existing.event as number,
-          overrideAccess: true,
-          depth: 0,
-        })) as Event)
+  // Only dispatch initial Master QR pass for pending_payment holds (pay_at_door guests already received it)
+  if (existing.status === 'pending_payment') {
+    const eventDoc =
+      typeof existing.event === 'object' && existing.event !== null
+        ? (existing.event as Event)
+        : ((await payload.findByID({
+            collection: 'events',
+            id: existing.event as number,
+            overrideAccess: true,
+            depth: 0,
+          })) as Event)
 
-  const [ticketsRes, tablesRes] = await Promise.all([
-    payload.find({
-      collection: 'booking-tickets',
-      overrideAccess: true,
-      where: { booking: { equals: bookingId } },
-      sort: 'ticketCode',
-      limit: 200,
-      depth: 0,
-    }),
-    payload.find({
-      collection: 'booking-tables',
-      overrideAccess: true,
-      where: { booking: { equals: bookingId } },
-      sort: 'tableLabel',
-      limit: 100,
-      depth: 0,
-    }),
-  ])
+    const [ticketsRes, tablesRes] = await Promise.all([
+      payload.find({
+        collection: 'booking-tickets',
+        overrideAccess: true,
+        where: { booking: { equals: bookingId } },
+        sort: 'ticketCode',
+        limit: 200,
+        depth: 0,
+      }),
+      payload.find({
+        collection: 'booking-tables',
+        overrideAccess: true,
+        where: { booking: { equals: bookingId } },
+        sort: 'tableLabel',
+        limit: 100,
+        depth: 0,
+      }),
+    ])
 
-  const tablesSummary =
-    tablesRes.docs.length > 0
-      ? tablesRes.docs.map((t) => `${t.tableLabel} (${t.capacity}p)`).join(', ')
-      : 'Unassigned'
+    const tablesSummary =
+      tablesRes.docs.length > 0
+        ? tablesRes.docs.map((t) => `${t.tableLabel} (${t.capacity}p)`).join(', ')
+        : 'Unassigned'
 
-  try {
-    await sendBookingNotifications({
-      payload,
-      bookingId: updated.id,
-      bookingCode: updated.bookingCode,
-      eventName: eventDoc.name,
-      eventDate: eventDoc.date,
-      eventVenue: eventDoc.venue,
-      holderName: updated.holderName,
-      phone: updated.phone,
-      email: updated.email,
-      totalPax: updated.totalPax,
-      totalAmount: updated.totalAmount,
-      tablesSummary,
-      ticketCodes: ticketsRes.docs.map((t) => t.ticketCode),
-      trigger: 'booking_created',
-    })
-  } catch {
-    // Non-fatal: payment is already captured and confirmed
+    try {
+      await sendBookingNotifications({
+        payload,
+        bookingId: updated.id,
+        bookingCode: updated.bookingCode,
+        eventName: eventDoc.name,
+        eventDate: eventDoc.date,
+        eventVenue: eventDoc.venue,
+        holderName: updated.holderName,
+        phone: updated.phone,
+        email: updated.email,
+        totalPax: updated.totalPax,
+        totalAmount: updated.totalAmount,
+        tablesSummary,
+        ticketCodes: ticketsRes.docs.map((t) => t.ticketCode),
+        trigger: 'booking_created',
+      })
+    } catch {
+      // Non-fatal: payment is already captured and confirmed
+    }
   }
 
   return { booking: updated, alreadyConfirmed: false }

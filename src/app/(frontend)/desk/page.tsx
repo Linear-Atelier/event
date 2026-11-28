@@ -31,7 +31,7 @@ export default async function BookingDeskPage(props: {
   const canCreate = userHasRole(user, ['booking_officer', 'super_admin'])
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+    <main className="mx-auto w-full max-w-2xl px-4 py-5 sm:px-6 lg:max-w-5xl pb-24">
       <BookingDeskClient
         events={eventsRes.docs.map((e) => ({
           id: e.id,

@@ -35,6 +35,8 @@ import type {
   GateSyncWorkerInMessage,
   GateSyncWorkerOutMessage,
 } from '@/workers/gate-sync.worker'
+import { EventSelectorBar } from '@/components/EventSelectorBar'
+import { Button, ModalShell, StatusBadge } from '@/components/ui/primitives'
 
 interface EventOption {
   id: number
@@ -118,7 +120,10 @@ export function GateScannerClient({
 
   // Manual lookup
   const [lookupQuery, setLookupQuery] = useState('')
+  const [lookupFocused, setLookupFocused] = useState(false)
   const [lookupResults, setLookupResults] = useState<CachedBooking[]>([])
+  const isManualLookupActive =
+    isScanOpen && (lookupFocused || lookupQuery.trim().length > 0)
 
   // Active check-in checklist modal
   const [activeBooking, setActiveBooking] = useState<CachedBooking | null>(null)
@@ -130,7 +135,7 @@ export function GateScannerClient({
   const [savingCheckin, setSavingCheckin] = useState(false)
   const [doorPaymentMethod, setDoorPaymentMethod] = useState<
     'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY'
-  >('CASH')
+  >('RAZORPAY')
   const [doorPaymentConfirmed, setDoorPaymentConfirmed] = useState(false)
   const [doorRzpLink, setDoorRzpLink] = useState<string | null>(null)
   const [doorRzpLoading, setDoorRzpLoading] = useState(false)
@@ -177,9 +182,7 @@ export function GateScannerClient({
   // Dedicated Web Worker for off-main-thread Push -> Pull sync (auto-runs every 60s)
   useEffect(() => {
     if (typeof window === 'undefined' || typeof Worker === 'undefined') return
-    const worker = new Worker(
-      new URL('../workers/gate-sync.worker.ts', import.meta.url),
-    )
+    const worker = new Worker(new URL('../workers/gate-sync.worker.ts', import.meta.url))
     syncWorkerRef.current = worker
 
     worker.onmessage = (event: MessageEvent<GateSyncWorkerOutMessage>) => {
@@ -197,7 +200,7 @@ export function GateScannerClient({
           const pushSummary =
             msg.pushedCount > 0 ? `Pushed ${msg.pushedCount} check-in(s) · ` : ''
           setStatusBanner(
-            `${pushSummary}Synced ${msg.bookingCount} bookings & ${msg.slotCount} attendee slots.`,
+            `${pushSummary}Synced ${msg.bookingCount} bookings & ${msg.slotCount} guest slots.`,
           )
         }
       } else if (msg.type === 'SYNC_ERROR') {
@@ -214,7 +217,6 @@ export function GateScannerClient({
     }
   }, [])
 
-  // Configure worker with active event & online status (triggers immediate sync + 60s loop)
   useEffect(() => {
     if (!syncWorkerRef.current || !selectedEventId) return
     const msg: GateSyncWorkerInMessage = {
@@ -225,7 +227,6 @@ export function GateScannerClient({
     syncWorkerRef.current.postMessage(msg)
   }, [selectedEventId, isOnline])
 
-  // Unified one-button Push + Pull sync on the worker thread
   const triggerUnifiedSync = useCallback(
     (manual: boolean) => {
       if (!selectedEventId || !isOnline || !syncWorkerRef.current) return
@@ -239,7 +240,6 @@ export function GateScannerClient({
     [selectedEventId, isOnline],
   )
 
-  // Open pre-ticked checklist for a booking, grouping couples / multi-pax tickets together
   const openBookingChecklist = useCallback(
     async (
       booking: CachedBooking,
@@ -257,7 +257,6 @@ export function GateScannerClient({
 
       tickets.sort((a, b) => a.ticketCode.localeCompare(b.ticketCode))
 
-      // Group slots by bookingTicketId and sort each ticket's guests by slotIndex (1, 2, ...)
       const slotsByTicket = new Map<number, CachedSlot[]>()
       for (const s of rawSlots) {
         const list = slotsByTicket.get(s.bookingTicketId) || []
@@ -285,7 +284,6 @@ export function GateScannerClient({
         slotsByTicket.delete(t.id)
       }
 
-      // Fallback for any slots without a matching cached ticket entry
       for (const [tId, tSlots] of slotsByTicket.entries()) {
         groups.push({
           ticketId: tId,
@@ -297,7 +295,6 @@ export function GateScannerClient({
         orderedSlots.push(...tSlots)
       }
 
-      // Pre-tick ALL remaining pending slots by default!
       const preTicked: Record<number, boolean> = {}
       for (const s of orderedSlots) {
         if (!s.checkedInAt) {
@@ -311,15 +308,14 @@ export function GateScannerClient({
       setCheckedSlotIds(preTicked)
       setSigStatus(verification)
       setScanMethod(method)
-      setDoorPaymentMethod('CASH')
+      setDoorPaymentMethod(isOnline ? 'RAZORPAY' : 'CASH')
       setDoorPaymentConfirmed(false)
       setDoorRzpLink(null)
       setDoorRzpError(null)
     },
-    [isScanOpen, scanOpensLabel, setActiveBooking, setCheckedSlotIds],
+    [isOnline, isScanOpen, scanOpensLabel],
   )
 
-  // Handle decoded QR string (supports compact `XMAS26-B012:9F4A2C8B` and legacy JSON)
   const handleQrDecoded = useCallback(
     async (raw: string) => {
       if (!isScanOpen) {
@@ -369,7 +365,6 @@ export function GateScannerClient({
         return
       }
 
-      // Legacy JSON QR fallback
       const parsed = decoded.payload
       const ev = await offlineDb.events.get(Number(parsed.eId))
       let verification: 'verified' | 'invalid' = 'invalid'
@@ -394,7 +389,6 @@ export function GateScannerClient({
     [isScanOpen, openBookingChecklist, scanOpensLabel],
   )
 
-  // Camera scanner lifecycle
   const stopCamera = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     rafRef.current = null
@@ -450,7 +444,6 @@ export function GateScannerClient({
     }
   }, [handleQrDecoded, stopCamera])
 
-  // Auto-open camera on mount if camera permission is already granted (only when scan is open)
   useEffect(() => {
     if (!isScanOpen || userStoppedCameraRef.current) return
     if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
@@ -474,7 +467,6 @@ export function GateScannerClient({
     return () => stopCamera()
   }, [stopCamera])
 
-  // Offline manual search by B042, B042-T01, phone, or holderName
   useEffect(() => {
     const q = lookupQuery.trim().toLowerCase()
     if (!q) return
@@ -486,11 +478,8 @@ export function GateScannerClient({
           .equals(selectedEventId)
           .toArray()
 
-        // Also match ticket codes (e.g. B042-T01) and individual attendee names
         const [matchingTickets, matchingSlots] = await Promise.all([
-          offlineDb.tickets
-            .filter((t) => t.ticketCode.toLowerCase().includes(q))
-            .toArray(),
+          offlineDb.tickets.filter((t) => t.ticketCode.toLowerCase().includes(q)).toArray(),
           offlineDb.slots
             .filter(
               (s) =>
@@ -524,7 +513,6 @@ export function GateScannerClient({
 
   const visibleLookupResults = isScanOpen && lookupQuery.trim() ? lookupResults : []
 
-  // Poll Razorpay status while a door Razorpay QR is open in the check-in modal
   useEffect(() => {
     if (
       !activeBooking ||
@@ -547,19 +535,20 @@ export function GateScannerClient({
         if (cancelled) return
         if (data.paymentStatus === 'paid') {
           await offlineDb.bookings.update(bookingId, {
+            status: 'confirmed',
             paymentMode: 'RAZORPAY',
             paymentStatus: 'paid',
           })
           setActiveBooking((prev) =>
             prev && prev.id === bookingId
-              ? { ...prev, paymentMode: 'RAZORPAY', paymentStatus: 'paid' }
+              ? { ...prev, status: 'confirmed', paymentMode: 'RAZORPAY', paymentStatus: 'paid' }
               : prev,
           )
           setDoorRzpLink(null)
           setDoorRzpError(null)
         }
       } catch {
-        // Ignore transient network errors while polling
+        // Ignore transient network errors
       }
     }
 
@@ -592,11 +581,14 @@ export function GateScannerClient({
       }
       if (data.alreadyPaid) {
         await offlineDb.bookings.update(activeBooking.id, {
+          status: 'confirmed',
           paymentMode: 'RAZORPAY',
           paymentStatus: 'paid',
         })
         setActiveBooking((prev) =>
-          prev ? { ...prev, paymentMode: 'RAZORPAY', paymentStatus: 'paid' } : prev,
+          prev
+            ? { ...prev, status: 'confirmed', paymentMode: 'RAZORPAY', paymentStatus: 'paid' }
+            : prev,
         )
         return
       }
@@ -610,7 +602,6 @@ export function GateScannerClient({
     }
   }
 
-  // Confirm pre-ticked check-in slots (locks permanently!)
   async function handleConfirmCheckin() {
     if (!activeBooking || !canScan) return
     if (!isScanOpen) {
@@ -619,21 +610,22 @@ export function GateScannerClient({
       return
     }
     const needsDoorPayment =
-      activeBooking.paymentMode === 'PAY_AT_DOOR' && activeBooking.paymentStatus !== 'paid'
+      activeBooking.status === 'pay_at_door' || activeBooking.paymentStatus !== 'paid'
     if (needsDoorPayment && (doorPaymentMethod === 'RAZORPAY' || !doorPaymentConfirmed)) {
       return
     }
 
     const toCheckIn = activeSlots.filter((s) => !s.checkedInAt && checkedSlotIds[s.id])
-    if (toCheckIn.length === 0) {
+    const offlineDoorMode =
+      needsDoorPayment && doorPaymentMethod !== 'RAZORPAY' ? doorPaymentMethod : undefined
+
+    if (toCheckIn.length === 0 && !offlineDoorMode) {
       setActiveBooking(null)
       return
     }
 
     setSavingCheckin(true)
     const nowIso = new Date().toISOString()
-    const offlineDoorMode =
-      needsDoorPayment && doorPaymentMethod !== 'RAZORPAY' ? doorPaymentMethod : undefined
 
     try {
       await offlineDb.transaction(
@@ -642,22 +634,36 @@ export function GateScannerClient({
         async () => {
           if (offlineDoorMode) {
             await offlineDb.bookings.update(activeBooking.id, {
+              status: 'confirmed',
               paymentMode: offlineDoorMode,
               paymentStatus: 'paid',
               totalAmount:
                 offlineDoorMode === 'COMPLIMENTARY' ? 0 : activeBooking.totalAmount,
             })
           }
-          for (const s of toCheckIn) {
-            await offlineDb.slots.update(s.id, {
-              checkedInAt: nowIso,
-              deviceId,
-              method: scanMethod,
-            })
+          if (toCheckIn.length > 0) {
+            for (const s of toCheckIn) {
+              await offlineDb.slots.update(s.id, {
+                checkedInAt: nowIso,
+                deviceId,
+                method: scanMethod,
+              })
+              await offlineDb.pendingSync.add({
+                slotId: s.id,
+                bookingId: activeBooking.id,
+                checkedInAt: nowIso,
+                deviceId,
+                method: scanMethod,
+                doorPaymentMode: offlineDoorMode,
+                synced: 0,
+              })
+            }
+          } else if (offlineDoorMode) {
+            // All slots already checked in (or booking has no slots): queue booking-level payment settlement
             await offlineDb.pendingSync.add({
-              slotId: s.id,
+              slotId: activeSlots[0]?.id || 0,
               bookingId: activeBooking.id,
-              checkedInAt: nowIso,
+              checkedInAt: activeSlots[0]?.checkedInAt || nowIso,
               deviceId,
               method: scanMethod,
               doorPaymentMode: offlineDoorMode,
@@ -677,8 +683,12 @@ export function GateScannerClient({
       setStatusBanner(
         offlineDoorMode
           ? offlineDoorMode === 'COMPLIMENTARY'
-            ? `Marked complimentary (₹0) & checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode}.`
-            : `Collected ₹${activeBooking.totalAmount.toLocaleString('en-IN')} (${modeText}) & checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode}.`
+            ? toCheckIn.length > 0
+              ? `Marked complimentary (₹0) & checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode}.`
+              : `Marked complimentary (₹0) for ${activeBooking.bookingCode}.`
+            : toCheckIn.length > 0
+              ? `Collected ₹${activeBooking.totalAmount.toLocaleString('en-IN')} (${modeText}) & checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode}.`
+              : `Collected ₹${activeBooking.totalAmount.toLocaleString('en-IN')} (${modeText}) for ${activeBooking.bookingCode}.`
           : `Checked in ${toCheckIn.length} guest(s) for ${activeBooking.bookingCode} (permanently locked).`,
       )
       setActiveBooking(null)
@@ -692,63 +702,62 @@ export function GateScannerClient({
     }
   }
 
+  function handleSelectEvent(nextId: number) {
+    const nextEv = events.find((ev) => ev.id === nextId)
+    if (nextEv && (nextEv.isScanOpen === false || !isScanAllowedForEventDate(nextEv.date))) {
+      stopCamera()
+      setLookupQuery('')
+      setActiveBooking(null)
+    }
+    setSelectedEventId(nextId)
+  }
+
   return (
-    <div className="fixed inset-x-0 bottom-[70px] top-0 z-10 mx-auto flex max-w-2xl flex-col bg-black">
-      {/* Top Frosted Glass Scanner Hero */}
-      <div className="shrink-0 px-4 py-3.5 text-white">
-        <div className="flex flex-wrap justify-between gap-2.5">
-          <div className="flex flex-col items-start gap-2 text-xs text-neutral-300">
+    <div className="flex min-h-[calc(100dvh-5.5rem)] flex-col bg-neutral-950 text-white">
+      {/* Dark Gate Control Header */}
+      <div className="shrink-0 space-y-3 border-b border-neutral-800 px-4 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
             <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold ${isOnline
+                ? 'bg-emerald-500/20 text-emerald-300'
+                : 'bg-amber-500/20 text-amber-300'
                 }`}
             >
-              {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-              {isOnline ? 'Online' : 'Offline Dead-Zone Mode'}
+              {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+              {isOnline ? 'Online' : 'Offline Mode'}
             </span>
-            <span>Device: {deviceId}</span>
           </div>
-
-          <select
-            value={selectedEventId}
-            onChange={(e) => {
-              const nextId = Number(e.target.value)
-              const nextEv = events.find((ev) => ev.id === nextId)
-              if (nextEv && (nextEv.isScanOpen === false || !isScanAllowedForEventDate(nextEv.date))) {
-                stopCamera()
-                setLookupQuery('')
-                setActiveBooking(null)
-              }
-              setSelectedEventId(nextId)
-            }}
-            className="rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-white"
-          >
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id}>
-                {ev.code} — {ev.name}
-              </option>
-            ))}
-          </select>
+          <span className="text-xs font-semibold text-neutral-400">Device: {deviceId}</span>
         </div>
 
-        {/* Unified Offline Sync Bar (Auto-syncs every 60s in Web Worker) */}
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2.5">
-          <div className="text-xs text-neutral-300">
+        <EventSelectorBar
+          events={events}
+          value={selectedEventId}
+          onChange={handleSelectEvent}
+          label=""
+          tone="dark"
+        />
+
+        {/* Offline Roster Sync Strip */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-900 px-3.5 py-2.5">
+          <div className="min-w-0 flex-1 text-sm text-neutral-200">
             {cachedEvent ? (
-              <span>
-                Cached: <strong>{cachedBookingCount} bookings</strong>
+              <div>
+                <span className="font-bold text-white">{cachedBookingCount} bookings</span> cached
                 {lastSyncedAt && (
-                  <span className="ml-2 text-[11px] text-neutral-400">
-                    · Synced{' '}
+                  <span className="ml-1.5 text-neutral-400">
+                    ·{' '}
                     {new Date(lastSyncedAt).toLocaleTimeString('en-IN', {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
                   </span>
                 )}
-              </span>
+              </div>
             ) : (
-              <span className="text-amber-300">
-                No roster cached yet — tap Sync before venue dead-zone!
+              <span className="font-semibold text-amber-300">
+                No roster cached — tap Sync before arriving at venue
               </span>
             )}
           </div>
@@ -757,161 +766,224 @@ export function GateScannerClient({
             type="button"
             disabled={syncing || !isOnline}
             onClick={() => triggerUnifiedSync(true)}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${pendingSyncCount > 0
+            className={`inline-flex min-h-12 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-extrabold transition disabled:opacity-45 ${pendingSyncCount > 0
               ? 'bg-amber-400 text-neutral-950 hover:bg-amber-300'
               : 'bg-white text-neutral-950 hover:bg-neutral-200'
-              } disabled:opacity-50`}
+              }`}
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
             {syncing
               ? 'Syncing…'
               : pendingSyncCount > 0
                 ? `Sync (${pendingSyncCount})`
-                : 'Sync'}
+                : 'Sync Roster'}
           </button>
         </div>
       </div>
 
       {statusBanner && (
-        <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 bg-neutral-100 px-4 py-2 text-xs font-medium text-neutral-900">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-3 text-sm font-semibold text-white">
           <span>{statusBanner}</span>
-          <button type="button" onClick={() => setStatusBanner(null)}>
-            <X className="h-4 w-4" />
+          <button
+            type="button"
+            onClick={() => setStatusBanner(null)}
+            aria-label="Dismiss status message"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-neutral-300 hover:bg-neutral-800 hover:text-white"
+          >
+            <X className="h-5 w-5" />
           </button>
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        {/* Center Camera Viewport / Centered Camera Toggle */}
-        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
-          {cameraActive ? (
-            <div className="relative h-full w-full bg-black">
-              <video
-                ref={videoRef}
-                playsInline
-                muted
-                className="h-full w-full object-cover"
-              />
-              <canvas ref={canvasRef} className="hidden" />
-              {/* Top & bottom black vignette gradients blending camera feed into header and manual lookup */}
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-black via-black/45 to-transparent" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-24 bg-gradient-to-t from-black via-black/55 to-transparent" />
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="relative h-58 w-58 rounded-3xl shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
-                  <span className="absolute left-0 top-0 h-8 w-8 rounded-tl-3xl border-l-[3px] border-t-[3px] border-white" />
-                  <span className="absolute right-0 top-0 h-8 w-8 rounded-tr-3xl border-r-[3px] border-t-[3px] border-white" />
-                  <span className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-3xl border-b-[3px] border-l-[3px] border-white" />
-                  <span className="absolute bottom-0 right-0 h-8 w-8 rounded-br-3xl border-b-[3px] border-r-[3px] border-white" />
-                </div>
-              </div>
-              <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    userStoppedCameraRef.current = true
-                    stopCamera()
-                  }}
-                  className="inline-flex items-center gap-2 rounded-full bg-neutral-950/80 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-rose-600"
-                >
-                  <CameraOff className="h-4 w-4" />
-                  Stop Camera
-                </button>
+      {/* Camera Viewport (shrinks into a compact bar while Manual Lookup is active) */}
+      <div
+        className={`relative flex items-center justify-center overflow-hidden bg-black transition-all ${isManualLookupActive ? 'shrink-0 px-4 py-3' : 'min-h-[340px] flex-1'
+          }`}
+      >
+        {isManualLookupActive ? (
+          <button
+            type="button"
+            onClick={() => {
+              setLookupQuery('')
+              setLookupFocused(false)
+              userStoppedCameraRef.current = false
+              void startCamera()
+            }}
+            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-neutral-700 bg-neutral-900 px-4 text-sm font-bold text-white transition hover:border-white hover:bg-neutral-800"
+          >
+            <Camera className="h-5 w-5" />
+            Switch Back to QR Camera
+          </button>
+        ) : cameraActive ? (
+          <div className="absolute inset-0 bg-black">
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className="h-full w-full object-cover"
+            />
+            <canvas ref={canvasRef} className="hidden" />
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center pb-16">
+              <div className="relative h-56 w-56 rounded-3xl shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
+                <span className="absolute left-0 top-0 h-8 w-8 rounded-tl-3xl border-l-[3px] border-t-[3px] border-white" />
+                <span className="absolute right-0 top-0 h-8 w-8 rounded-tr-3xl border-r-[3px] border-t-[3px] border-white" />
+                <span className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-3xl border-b-[3px] border-l-[3px] border-white" />
+                <span className="absolute bottom-0 right-0 h-8 w-8 rounded-br-3xl border-b-[3px] border-r-[3px] border-white" />
               </div>
             </div>
-          ) : !isScanOpen ? (
-            <div className="flex flex-col items-center justify-center px-6 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-neutral-300">
-                <Lock className="h-5 w-5" />
-              </div>
-              <p className="mt-3 text-sm font-bold text-white">
-                Gate Check-In Opens on{' '}
-                {selectedEvent ? formatEventDayLabel(selectedEvent.date) : 'Event Day'}
-              </p>
-              <p className="mt-1 max-w-xs text-xs text-neutral-400">
-                Scanning is disabled until the date of the event. You can still tap Sync above to pre-download the offline roster.
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center px-6 text-center">
+            <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center">
               <button
                 type="button"
                 onClick={() => {
-                  userStoppedCameraRef.current = false
-                  void startCamera()
+                  userStoppedCameraRef.current = true
+                  stopCamera()
                 }}
-                className="glass-surface inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-sm font-bold text-white shadow-xl transition hover:scale-[1.02] active:scale-[0.98]"
+                className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/25 bg-neutral-950/90 px-5 text-sm font-bold text-white transition hover:bg-rose-600"
               >
-                <Camera className="h-5 w-5 text-white" />
-                Start Camera
+                <CameraOff className="h-5 w-5" />
+                Stop Camera
               </button>
-              <p className="mt-3 text-xs text-neutral-400">
-                Tap to scan Master QR passes offline
-              </p>
-              {cameraError && (
-                <p className="mt-2 max-w-xs text-xs font-medium text-rose-600">
-                  {cameraError}
-                </p>
-              )}
             </div>
-          )}
-        </div>
+          </div>
+        ) : !isScanOpen ? (
+          <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-900 text-neutral-300">
+              <Lock className="h-6 w-6" />
+            </div>
+            <p className="mt-3 text-lg font-extrabold text-white">
+              Gate Check-In Opens on{' '}
+              {selectedEvent ? formatEventDayLabel(selectedEvent.date) : 'Event Day'}
+            </p>
+            <p className="mt-1.5 max-w-sm text-sm text-neutral-300">
+              Scanning is locked until event day. You can still tap Sync Roster above to download
+              the guest list ahead of time.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                userStoppedCameraRef.current = false
+                void startCamera()
+              }}
+              className="inline-flex min-h-14 items-center gap-2.5 rounded-2xl bg-white px-7 text-base font-extrabold text-neutral-950 transition hover:bg-neutral-200 active:scale-[0.98]"
+            >
+              <Camera className="h-5 w-5" />
+              Start Camera
+            </button>
+            <p className="mt-3 text-sm font-medium text-neutral-300">
+              Tap to scan Master QR passes offline
+            </p>
+            {cameraError && (
+              <p className="mt-2 max-w-sm text-sm font-semibold text-rose-400">{cameraError}</p>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Offline Manual Lookup (Dark Frosted Glass Sheet at Bottom) */}
-      <div className="px-4 py-4 pb-6 text-white">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-white">
-            Manual Lookup
-          </h2>
-          {!isScanOpen && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-semibold text-neutral-300">
-              <Lock className="h-3 w-3" />
+      {/* Offline Manual Lookup */}
+      <div
+        className={`border-t border-neutral-800 bg-neutral-950 px-4 py-4 ${isManualLookupActive ? 'flex min-h-0 flex-1 flex-col' : 'shrink-0'
+          }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base font-extrabold text-white">Manual Lookup</h2>
+          {!isScanOpen ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-800 px-3 py-1 text-xs font-bold text-neutral-200">
+              <Lock className="h-3.5 w-3.5" />
               Opens {scanOpensLabel}
             </span>
-          )}
+          ) : isManualLookupActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                setLookupQuery('')
+                setLookupFocused(false)
+              }}
+              className="min-h-10 rounded-lg px-2.5 text-sm font-bold text-neutral-300 hover:bg-neutral-800 hover:text-white"
+            >
+              Done
+            </button>
+          ) : null}
         </div>
-        <div className="relative mt-2">
+
+        <div className="relative mt-2.5">
           {isScanOpen ? (
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
+            <Search className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-neutral-400" />
           ) : (
-            <Lock className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-neutral-500" />
+            <Lock className="pointer-events-none absolute left-3.5 top-3.5 h-5 w-5 text-neutral-500" />
           )}
           <input
             type="text"
             disabled={!isScanOpen}
             value={isScanOpen ? lookupQuery : ''}
-            onChange={(e) => setLookupQuery(e.target.value)}
+            onFocus={() => {
+              setLookupFocused(true)
+              if (cameraActive) {
+                userStoppedCameraRef.current = true
+                stopCamera()
+              }
+            }}
+            onBlur={() => {
+              if (!lookupQuery.trim()) {
+                setLookupFocused(false)
+              }
+            }}
+            onChange={(e) => {
+              const next = e.target.value
+              setLookupQuery(next)
+              if (next.trim() && cameraActive) {
+                userStoppedCameraRef.current = true
+                stopCamera()
+              }
+            }}
             placeholder={
               isScanOpen
-                ? 'Type XMAS26-B001, phone number, or guest name...'
-                : `Manual check-in opens on ${scanOpensLabel}...`
+                ? 'Type booking code, phone, or guest name…'
+                : `Manual check-in opens on ${scanOpensLabel}…`
             }
-            className="w-full rounded-2xl border border-white/15 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white placeholder-neutral-400 transition focus:border-white/60 focus:bg-white/15 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-12 w-full rounded-xl border border-neutral-700 bg-neutral-900 py-2.5 pl-11 pr-11 text-base text-white placeholder:text-neutral-400 transition focus:border-white focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           />
+          {isScanOpen && lookupQuery && (
+            <button
+              type="button"
+              onClick={() => setLookupQuery('')}
+              aria-label="Clear search"
+              className="absolute right-1.5 top-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {visibleLookupResults.length > 0 && (
-          <div className="mt-3 max-h-52 divide-y divide-dashed divide-white/10 overflow-y-auto">
+          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto  pb-24">
             {visibleLookupResults.map((b) => (
               <button
                 key={b.id}
                 type="button"
                 onClick={() => openBookingChecklist(b, 'manual', 'manual_code')}
-                className="flex w-full items-center justify-between rounded-xl px-2 py-3 text-left transition hover:bg-white/10"
+                className="flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-900 px-3.5 py-3 text-left transition hover:border-neutral-600 hover:bg-neutral-800"
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white">{b.bookingCode}</span>
-                    <span className="text-sm font-medium text-neutral-200">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-extrabold text-white">{b.bookingCode}</span>
+                    <span className="truncate text-base font-semibold text-neutral-200">
                       {b.holderName}
                     </span>
+                    {b.status === 'pay_at_door' && (
+                      <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-bold text-amber-300 tabular-nums">
+                        Pay at Door · ₹{b.totalAmount.toLocaleString('en-IN')}
+                      </span>
+                    )}
                   </div>
-                  <div className="text-xs text-neutral-400">
-                    {b.phone} · {b.totalPax} Pax · Tables: {b.tablesSummary}
+                  <div className="mt-0.5 text-sm text-neutral-400">
+                    {b.phone} · {b.totalPax} Guests · Tables: {b.tablesSummary}
                   </div>
                 </div>
-                <span className="rounded-xl bg-white/15 px-3 py-1.5 text-xs font-bold text-white">
-                  Check In →
+                <span className="shrink-0 rounded-xl bg-white px-3.5 py-2 text-sm font-extrabold text-neutral-950">
+                  Check In
                 </span>
               </button>
             ))}
@@ -919,68 +991,95 @@ export function GateScannerClient({
         )}
       </div>
 
-      {/* PRE-TICKED ATTENDEE CHECKLIST MODAL */}
+      {/* HIGH-CONTRAST WHITE ATTENDEE CHECKLIST MODAL */}
       {activeBooking && (
-        <div className="fixed inset-x-0 bottom-[70px] top-0 z-50 flex items-end justify-center bg-neutral-950/70 p-3 sm:items-center sm:p-4">
-          <div className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-2xl">
-            <div className="flex shrink-0 items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl font-extrabold text-neutral-900">
-                    {activeBooking.bookingCode}
-                  </span>
-                  {activeBooking.status === 'cancelled' && (
-                    <span className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
-                      CANCELLED
-                    </span>
-                  )}
-                </div>
-                <div className="text-sm font-semibold text-neutral-800">
-                  {activeBooking.holderName} · {activeBooking.totalPax} Pax
-                </div>
-                <div className="text-xs text-neutral-500">
-                  Tables: {activeBooking.tablesSummary} · {activeBooking.paymentMode} (
-                  {activeBooking.paymentStatus})
-                </div>
-              </div>
-              <button type="button" onClick={() => setActiveBooking(null)}>
-                <X className="h-5 w-5 text-neutral-400" />
-              </button>
+        <ModalShell
+          title={activeBooking.bookingCode}
+          badge={
+            activeBooking.status === 'cancelled' ? (
+              <StatusBadge tone="rose">CANCELLED</StatusBadge>
+            ) : undefined
+          }
+          subtitle={`${activeBooking.holderName} · ${activeBooking.totalPax} Guests · Tables: ${activeBooking.tablesSummary}`}
+          onClose={() => setActiveBooking(null)}
+          disableClose={savingCheckin}
+          maxWidthClass="max-w-md"
+          footer={
+            <div className="flex gap-2.5">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setActiveBooking(null)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="success"
+                loading={savingCheckin}
+                disabled={
+                  !canScan ||
+                  !isScanOpen ||
+                  activeBooking.status === 'cancelled' ||
+                  (activeBooking.status === 'pay_at_door' ||
+                    activeBooking.paymentStatus !== 'paid'
+                    ? doorPaymentMethod === 'RAZORPAY' || !doorPaymentConfirmed
+                    : activeSlots.every((s) => Boolean(s.checkedInAt)))
+                }
+                onClick={handleConfirmCheckin}
+                className="flex-[1.7]"
+              >
+                {savingCheckin
+                  ? 'Saving…'
+                  : activeBooking.status === 'pay_at_door' ||
+                    activeBooking.paymentStatus !== 'paid'
+                    ? doorPaymentMethod === 'RAZORPAY'
+                      ? 'Awaiting Razorpay…'
+                      : doorPaymentMethod === 'COMPLIMENTARY'
+                        ? activeSlots.every((s) => Boolean(s.checkedInAt))
+                          ? 'Mark Free (₹0)'
+                          : 'Mark Free & Check In'
+                        : activeSlots.every((s) => Boolean(s.checkedInAt))
+                          ? `Collect ₹${activeBooking.totalAmount.toLocaleString('en-IN')}`
+                          : `Collect ₹${activeBooking.totalAmount.toLocaleString('en-IN')} & Check In`
+                    : 'Confirm & Lock Check-In'}
+              </Button>
             </div>
-
+          }
+        >
+          <div className="space-y-4">
             {/* Ed25519 Signature Status */}
-            <div className="mt-3">
-              {sigStatus === 'verified' && (
-                <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  QR Signature Verified
-                </div>
-              )}
-              {sigStatus === 'invalid' && (
-                <div className="flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
-                  <ShieldAlert className="h-4 w-4 text-rose-600" />
-                  Warning: QR signature could not be verified!
-                </div>
-              )}
-            </div>
+            {sigStatus === 'verified' && (
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm font-bold text-emerald-900">
+                <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-700" />
+                QR Signature Verified Offline
+              </div>
+            )}
+            {sigStatus === 'invalid' && (
+              <div className="flex items-center gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-sm font-bold text-rose-900">
+                <ShieldAlert className="h-5 w-5 shrink-0 text-rose-700" />
+                Warning: QR signature could not be verified!
+              </div>
+            )}
 
-            {/* Mandatory Pay-at-Door Collection Step (All /desk payment options) */}
-            {activeBooking.paymentMode === 'PAY_AT_DOOR' &&
-              activeBooking.paymentStatus !== 'paid' && (
-                <div className="mt-3 shrink-0 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+            {/* Pay-at-Door Collection Step */}
+            {(activeBooking.status === 'pay_at_door' ||
+              activeBooking.paymentStatus !== 'paid') && (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                      <Wallet className="h-4 w-4 text-amber-700" />
+                    <div className="flex items-center gap-2 font-extrabold text-amber-950">
+                      <Wallet className="h-5 w-5 text-amber-800" />
                       Payment Due at Door
                     </div>
-                    <span className="text-sm font-extrabold text-amber-950 tabular-nums">
+                    <span className="text-lg font-extrabold text-amber-950 tabular-nums">
                       {doorPaymentMethod === 'COMPLIMENTARY'
                         ? '₹0'
                         : `₹${activeBooking.totalAmount.toLocaleString('en-IN')}`}
                     </span>
                   </div>
 
-                  <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+                  <div className="mt-3 grid grid-cols-2 gap-2">
                     {(
                       [
                         { key: 'RAZORPAY', label: isOnline ? 'Razorpay QR' : 'Razorpay (Offline)' },
@@ -998,9 +1097,9 @@ export function GateScannerClient({
                           setDoorPaymentConfirmed(false)
                           setDoorRzpError(null)
                         }}
-                        className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-45 ${doorPaymentMethod === opt.key
-                          ? 'bg-amber-900 text-white shadow-xs'
-                          : 'border border-amber-300 bg-white text-amber-900 hover:bg-amber-100/70'
+                        className={`min-h-12 rounded-xl px-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-45 ${doorPaymentMethod === opt.key
+                          ? 'bg-amber-900 text-white'
+                          : 'border border-amber-300 bg-white text-amber-950 hover:bg-amber-100'
                           }`}
                       >
                         {opt.label}
@@ -1009,54 +1108,48 @@ export function GateScannerClient({
                   </div>
 
                   {doorPaymentMethod === 'RAZORPAY' ? (
-                    <div className="mt-2.5 rounded-lg bg-neutral-950 p-3 text-center text-white">
+                    <div className="mt-3 ">
                       {doorRzpLink ? (
-                        <div className="flex flex-col items-center gap-2">
+                        <div className="flex flex-col items-center gap-2.5">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={`/api/qr/link?url=${encodeURIComponent(doorRzpLink)}`}
                             alt="Razorpay Payment QR"
-                            className="h-36 w-36 rounded-xl"
+                            className="h-44 w-44 rounded-xl border border-neutral-800 bg-neutral-950 p-2.5"
                           />
-                          <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-300">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <div className="flex items-center gap-2 text-sm font-bold text-emerald-700">
+                            <Loader2 className="h-4 w-4 animate-spin" />
                             <span>Waiting for Razorpay payment…</span>
                           </div>
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          <button
+                          <Button
                             type="button"
-                            disabled={doorRzpLoading || !isOnline}
+                            variant="primary"
+                            fullWidth
+                            loading={doorRzpLoading}
+                            disabled={!isOnline}
                             onClick={handleGenerateDoorRazorpay}
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-bold text-neutral-950 transition hover:bg-neutral-200 disabled:opacity-50"
                           >
-                            {doorRzpLoading ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                Generating QR…
-                              </>
-                            ) : (
-                              <>
-                                <QrCode className="h-3.5 w-3.5" />
-                                Generate Razorpay QR · ₹
-                                {activeBooking.totalAmount.toLocaleString('en-IN')}
-                              </>
-                            )}
-                          </button>
+                            {!doorRzpLoading && <QrCode className="h-4 w-4" />}
+                            {doorRzpLoading
+                              ? 'Generating QR…'
+                              : `Generate QR · ₹${activeBooking.totalAmount.toLocaleString('en-IN')}`}
+                          </Button>
                           {doorRzpError && (
-                            <p className="text-[11px] font-medium text-rose-300">{doorRzpError}</p>
+                            <p className="text-sm font-semibold text-rose-700">{doorRzpError}</p>
                           )}
                         </div>
                       )}
                     </div>
                   ) : (
-                    <label className="mt-2.5 flex cursor-pointer items-center gap-2 rounded-lg bg-white/80 px-2.5 py-2 font-semibold text-amber-950 ring-1 ring-amber-200">
+                    <label className="mt-3 flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-amber-300 bg-white px-3.5 py-2.5 font-bold text-amber-950">
                       <input
                         type="checkbox"
                         checked={doorPaymentConfirmed}
                         onChange={(e) => setDoorPaymentConfirmed(e.target.checked)}
-                        className="h-4 w-4 rounded accent-amber-700"
+                        className="h-6 w-6 shrink-0 rounded accent-amber-800"
                       />
                       <span>
                         {doorPaymentMethod === 'COMPLIMENTARY'
@@ -1068,45 +1161,43 @@ export function GateScannerClient({
                 </div>
               )}
 
-            {/* Attendee Slots Checklist (Grouped by Ticket; Pre-ticked by default; checked-in slots locked permanently) */}
-            <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+            {/* Pre-Ticked Guest Checklist */}
+            <div className="space-y-3">
+              <div className="text-sm font-bold text-neutral-700">
                 Uncheck absent guests, then confirm check-in:
               </div>
               {activeTicketGroups.map((grp) => (
                 <div
                   key={grp.ticketId}
-                  className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-2.5"
+                  className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3"
                 >
-                  <div className="mb-1.5 flex items-center justify-between px-1">
-                    <span className="text-xs font-bold text-neutral-800">
+                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                    <span className="text-sm font-extrabold text-neutral-900">
                       {grp.ticketCode} · {grp.typeName}
                     </span>
-                    <span className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-neutral-600 shadow-xs">
+                    <StatusBadge tone="neutral">
                       {grp.slots.length} {grp.slots.length === 1 ? 'Guest' : 'Guests'}
-                    </span>
+                    </StatusBadge>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {grp.slots.map((slot) => {
                       const alreadyLocked = Boolean(slot.checkedInAt)
                       const checked = alreadyLocked || Boolean(checkedSlotIds[slot.id])
                       const displayName =
-                        slot.attendeeName ||
-                        slot.label.split(' — ')[0] ||
-                        slot.label
+                        slot.attendeeName || slot.label.split(' — ')[0] || slot.label
 
                       return (
                         <label
                           key={slot.id}
-                          className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-xs transition ${alreadyLocked
-                            ? 'border-neutral-200 bg-neutral-100 text-neutral-500'
+                          className={`flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 transition ${alreadyLocked
+                            ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-600'
                             : checked
-                              ? 'border-emerald-400 bg-emerald-50/80 text-neutral-900'
-                              : 'border-neutral-200 bg-white text-neutral-700'
+                              ? 'border-emerald-500 bg-emerald-50 text-neutral-950'
+                              : 'border-neutral-300 bg-white text-neutral-800'
                             }`}
                         >
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-3">
                             <input
                               type="checkbox"
                               disabled={alreadyLocked || activeBooking.status === 'cancelled'}
@@ -1117,17 +1208,17 @@ export function GateScannerClient({
                                   [slot.id]: e.target.checked,
                                 }))
                               }
-                              className="h-4 w-4 rounded accent-emerald-600"
+                              className="h-6 w-6 shrink-0 rounded accent-emerald-700"
                             />
                             <div>
-                              <div className="font-semibold">{displayName}</div>
+                              <div className="text-base font-bold">{displayName}</div>
                               {grp.slots.length > 1 && !alreadyLocked && (
-                                <div className="text-[10px] text-neutral-500">
+                                <div className="text-xs font-medium text-neutral-600">
                                   Guest {slot.slotIndex} of {grp.slots.length}
                                 </div>
                               )}
                               {alreadyLocked && (
-                                <div className="text-[10px] text-neutral-500">
+                                <div className="text-xs font-medium text-neutral-600">
                                   Checked in at{' '}
                                   {new Date(slot.checkedInAt!).toLocaleTimeString('en-IN', {
                                     hour: '2-digit',
@@ -1139,12 +1230,14 @@ export function GateScannerClient({
                           </div>
 
                           {alreadyLocked ? (
-                            <span className="inline-flex items-center gap-1 rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-bold text-neutral-600">
-                              <Lock className="h-3 w-3" /> LOCKED
-                            </span>
+                            <StatusBadge tone="neutral">
+                              <Lock className="h-3.5 w-3.5" />
+                              LOCKED
+                            </StatusBadge>
                           ) : (
                             <CheckCircle2
-                              className={`h-4 w-4 ${checked ? 'text-emerald-600' : 'text-neutral-300'}`}
+                              className={`h-5 w-5 shrink-0 ${checked ? 'text-emerald-700' : 'text-neutral-300'
+                                }`}
                             />
                           )}
                         </label>
@@ -1154,46 +1247,9 @@ export function GateScannerClient({
                 </div>
               ))}
             </div>
-
-            <div className="mt-4 flex shrink-0 gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveBooking(null)}
-                className="flex-1 rounded-xl border border-neutral-300 py-2.5 text-xs font-bold text-neutral-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={
-                  !canScan ||
-                  !isScanOpen ||
-                  savingCheckin ||
-                  activeBooking.status === 'cancelled' ||
-                  activeSlots.every((s) => Boolean(s.checkedInAt)) ||
-                  (activeBooking.paymentMode === 'PAY_AT_DOOR' &&
-                    activeBooking.paymentStatus !== 'paid' &&
-                    (doorPaymentMethod === 'RAZORPAY' || !doorPaymentConfirmed))
-                }
-                onClick={handleConfirmCheckin}
-                className="flex-[2] rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {savingCheckin
-                  ? 'Locking Check-In…'
-                  : activeBooking.paymentMode === 'PAY_AT_DOOR' &&
-                    activeBooking.paymentStatus !== 'paid'
-                    ? doorPaymentMethod === 'RAZORPAY'
-                      ? 'Awaiting Razorpay…'
-                      : doorPaymentMethod === 'COMPLIMENTARY'
-                        ? 'Mark Complimentary & Check In'
-                        : `Collect ₹${activeBooking.totalAmount.toLocaleString('en-IN')} & Check In`
-                    : 'Confirm & Lock Check-In'}
-              </button>
-            </div>
           </div>
-        </div>
+        </ModalShell>
       )}
-
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { formatEventDayLabel, isScanAllowedForEventDate } from '@/lib/event-date
 
 interface SyncCheckinItem {
   slotId: number
+  bookingId?: number
   checkedInAt: string
   deviceId: string
   method?: 'qr_scan' | 'manual_code'
@@ -36,7 +37,15 @@ export async function POST(request: Request) {
       ),
     )
 
-    if (slotIds.length === 0) {
+    const doorOnlyBookingIds = Array.from(
+      new Set(
+        items
+          .filter((i) => !(Number(i.slotId) > 0) && Number(i.bookingId) > 0 && Boolean(i.doorPaymentMode))
+          .map((i) => Number(i.bookingId)),
+      ),
+    )
+
+    if (slotIds.length === 0 && doorOnlyBookingIds.length === 0) {
       return NextResponse.json({ synced: 0, alreadyLocked: 0, blockedBeforeEventDate: 0, results: [] })
     }
 
@@ -44,30 +53,77 @@ export async function POST(request: Request) {
     const db = payload.db.drizzle
 
     // Resolve each slot's parent booking status, payment info & event date before updating
-    const metaRes = await db.execute(sql`
-      SELECT
-        s.id AS "slotId",
-        b.id AS "bookingId",
-        b.status AS "bookingStatus",
-        b.payment_mode AS "paymentMode",
-        b.payment_status AS "paymentStatus",
-        e.date AS "eventDate",
-        e.name AS "eventName"
-      FROM ticket_checkin_slots s
-      JOIN bookings b ON b.id = s.booking_id
-      JOIN events e ON e.id = b.event_id
-      WHERE s.id IN (${sql.join(
-        slotIds.map((id) => sql`${id}`),
-        sql`, `,
-      )})
-    `)
+    const metaRes =
+      slotIds.length > 0
+        ? await db.execute(sql`
+            SELECT
+              s.id AS "slotId",
+              b.id AS "bookingId",
+              b.status AS "bookingStatus",
+              b.payment_mode AS "paymentMode",
+              b.payment_status AS "paymentStatus",
+              e.date AS "eventDate",
+              e.name AS "eventName"
+            FROM ticket_checkin_slots s
+            JOIN bookings b ON b.id = s.booking_id
+            JOIN events e ON e.id = b.event_id
+            WHERE s.id IN (${sql.join(
+              slotIds.map((id) => sql`${id}`),
+              sql`, `,
+            )})
+          `)
+        : { rows: [] }
+
+    const bookingMetaRes =
+      doorOnlyBookingIds.length > 0
+        ? await db.execute(sql`
+            SELECT
+              b.id AS "bookingId",
+              b.status AS "bookingStatus",
+              b.payment_mode AS "paymentMode",
+              b.payment_status AS "paymentStatus",
+              e.date AS "eventDate",
+              e.name AS "eventName"
+            FROM bookings b
+            JOIN events e ON e.id = b.event_id
+            WHERE b.id IN (${sql.join(
+              doorOnlyBookingIds.map((id) => sql`${id}`),
+              sql`, `,
+            )})
+          `)
+        : { rows: [] }
+
+    const metaByBookingId = new Map<
+      number,
+      {
+        bookingId: number
+        bookingStatus: string
+        paymentMode: string | null
+        paymentStatus: string
+        eventDate: string
+        eventName: string
+      }
+    >()
+    for (const row of bookingMetaRes.rows as Array<{
+      bookingId: number
+      bookingStatus: string
+      paymentMode: string | null
+      paymentStatus: string
+      eventDate: string
+      eventName: string
+    }>) {
+      metaByBookingId.set(Number(row.bookingId), {
+        ...row,
+        bookingId: Number(row.bookingId),
+      })
+    }
 
     const metaBySlotId = new Map<
       number,
       {
         bookingId: number
         bookingStatus: string
-        paymentMode: string
+        paymentMode: string | null
         paymentStatus: string
         eventDate: string
         eventName: string
@@ -77,7 +133,7 @@ export async function POST(request: Request) {
       slotId: number
       bookingId: number
       bookingStatus: string
-      paymentMode: string
+      paymentMode: string | null
       paymentStatus: string
       eventDate: string
       eventName: string
@@ -101,13 +157,16 @@ export async function POST(request: Request) {
 
     for (const item of items) {
       const slotId = Number(item.slotId)
-      if (!slotId || Number.isNaN(slotId)) continue
+      const isDoorOnly = !(slotId > 0) && Number(item.bookingId) > 0 && Boolean(item.doorPaymentMode)
+      if (!isDoorOnly && (!slotId || Number.isNaN(slotId))) continue
 
-      const meta = metaBySlotId.get(slotId)
+      const meta = isDoorOnly
+        ? metaByBookingId.get(Number(item.bookingId))
+        : metaBySlotId.get(slotId)
       if (!meta) continue
 
       if (meta.bookingStatus === 'cancelled' || meta.bookingStatus === 'pending_payment') {
-        results.push({ slotId, status: 'blocked_invalid_booking' })
+        results.push({ slotId: slotId || 0, status: 'blocked_invalid_booking' })
         continue
       }
 
@@ -116,7 +175,7 @@ export async function POST(request: Request) {
         if (!firstBlockedDateLabel) {
           firstBlockedDateLabel = formatEventDayLabel(meta.eventDate)
         }
-        results.push({ slotId, status: 'blocked_before_event_date' })
+        results.push({ slotId: slotId || 0, status: 'blocked_before_event_date' })
         continue
       }
 
@@ -124,13 +183,14 @@ export async function POST(request: Request) {
       const deviceId = String(item.deviceId || 'GATE-DEVICE').slice(0, 64)
       const method = item.method === 'manual_code' ? 'manual_code' : 'qr_scan'
 
-      // If this booking was PAY_AT_DOOR (pending) and gate staff settled payment at check-in,
-      // mark it paid & attribute collection appropriately for Treasurer reconciliation.
-      if (meta.paymentMode === 'PAY_AT_DOOR' && meta.paymentStatus === 'pending') {
+      // If this booking was pay_at_door (pending) and gate staff settled payment at check-in,
+      // transition status -> confirmed, mark paid & attribute collection to the gate officer.
+      if (meta.bookingStatus === 'pay_at_door' || meta.paymentStatus === 'pending') {
         if (item.doorPaymentMode === 'COMPLIMENTARY') {
           await db.execute(sql`
             UPDATE bookings
             SET
+              status = 'confirmed',
               payment_status = 'paid',
               payment_mode = 'COMPLIMENTARY',
               total_amount = 0,
@@ -141,15 +201,16 @@ export async function POST(request: Request) {
               treasurer_verified_at = NOW(),
               updated_at = NOW()
             WHERE id = ${meta.bookingId}
-              AND payment_mode = 'PAY_AT_DOOR'
-              AND payment_status = 'pending'
+              AND (status = 'pay_at_door' OR payment_status = 'pending')
           `)
+          meta.bookingStatus = 'confirmed'
           meta.paymentMode = 'COMPLIMENTARY'
           meta.paymentStatus = 'paid'
         } else if (item.doorPaymentMode === 'CASH' || item.doorPaymentMode === 'OFFICER_UPI') {
           await db.execute(sql`
             UPDATE bookings
             SET
+              status = 'confirmed',
               payment_status = 'paid',
               payment_mode = ${item.doorPaymentMode},
               paid_amount = total_amount,
@@ -157,12 +218,18 @@ export async function POST(request: Request) {
               settlement_status = 'with_officer',
               updated_at = NOW()
             WHERE id = ${meta.bookingId}
-              AND payment_mode = 'PAY_AT_DOOR'
-              AND payment_status = 'pending'
+              AND (status = 'pay_at_door' OR payment_status = 'pending')
           `)
+          meta.bookingStatus = 'confirmed'
           meta.paymentMode = item.doorPaymentMode
           meta.paymentStatus = 'paid'
         }
+      }
+
+      if (isDoorOnly) {
+        synced += 1
+        results.push({ slotId: 0, status: 'synced' })
+        continue
       }
 
       // Atomic idempotent UPDATE: only locks slots where checked_in_at IS NULL

@@ -75,7 +75,6 @@ export async function POST(
         body.email !== undefined ? String(body.email || '').trim() : booking.email || ''
       const notes =
         body.notes !== undefined ? String(body.notes || '').trim() : booking.notes || ''
-      const markTransferred = Boolean(body.markTransferred)
       const resendChannels = String(body.resendChannels || 'none') as
         | 'none'
         | 'email'
@@ -254,16 +253,6 @@ export async function POST(
         }
       }
 
-      const transferAudit =
-        markTransferred && booking.status !== 'transferred'
-          ? `[Transferred from ${booking.holderName} to ${holderName} by ${user.name || user.email}]`
-          : ''
-      const finalNotes = transferAudit
-        ? notes
-          ? `${notes}\n${transferAudit}`
-          : transferAudit
-        : notes
-
       const updated = await payload.update({
         collection: 'bookings',
         id: bookingId,
@@ -273,8 +262,7 @@ export async function POST(
           holderName,
           phone,
           email: email || undefined,
-          notes: finalNotes || undefined,
-          ...(markTransferred ? { status: 'transferred' } : {}),
+          notes: notes || undefined,
         },
       })
 
@@ -341,7 +329,11 @@ export async function POST(
           { status: 400 },
         )
       }
-      if (booking.paymentStatus === 'paid' && booking.status !== 'pending_payment') {
+      if (
+        booking.paymentStatus === 'paid' &&
+        booking.status !== 'pending_payment' &&
+        booking.status !== 'pay_at_door'
+      ) {
         return NextResponse.json({ error: 'Booking is already paid.' }, { status: 400 })
       }
 

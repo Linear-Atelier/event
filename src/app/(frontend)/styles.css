@@ -6,29 +6,20 @@
 
 @layer base {
   body {
-    background-color: #ffffff;
+    background-color: #fafafa;
     color: #0a0a0a;
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
-}
 
-.glass-surface {
-  background: linear-gradient(145deg, rgba(16, 16, 18, 0.94) 0%, rgba(28, 28, 30, 0.90) 100%);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  /* border: 1px solid rgba(255, 255, 255, 0.14); */
-}
-
-.glass-tile {
-  background: linear-gradient(155deg, rgba(32, 32, 34, 0.92) 0%, rgba(16, 16, 18, 0.96) 100%);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  button:not(:disabled),
+  a[href] {
+    cursor: pointer;
+  }
 }
 
 .ticket-perforation {
-  border-top: 1.5px dashed #e5e5e5;
+  border-top: 1.5px dashed #d4d4d4;
 }
 
 @media print {
@@ -38,10 +29,6 @@
   body {
     background-color: #ffffff !important;
   }
-}
-
-button {
-  cursor: pointer
 }
 
 @keyframes pageLoaderSlide {

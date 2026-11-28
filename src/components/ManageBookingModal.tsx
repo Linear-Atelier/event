@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
-  ArrowRightLeft,
   Ban,
   CheckCircle2,
   CreditCard,
@@ -12,9 +11,20 @@ import {
   Lock,
   UserPen,
   Users,
-  X,
 } from 'lucide-react'
 import type { DashboardBookingRow, DashboardTableCard } from './EventDashboardClient'
+import {
+  Button,
+  FieldLabel,
+  ModalShell,
+  SegmentedTabs,
+  SelectInput,
+  StatusBadge,
+  TextArea,
+  TextInput,
+  buttonClasses,
+  type SegmentedTabItem,
+} from '@/components/ui/primitives'
 
 interface ManageBookingModalProps {
   event: {
@@ -37,10 +47,14 @@ export function ManageBookingModal({
   onUpdated,
 }: ManageBookingModalProps) {
   const isCancelled = booking.status === 'cancelled'
+  const isUnpaidDoorBooking = booking.status === 'pay_at_door'
   const isPendingPayment =
-    !isCancelled && (booking.paymentStatus === 'pending' || booking.status === 'pending_payment')
+    !isCancelled &&
+    (isUnpaidDoorBooking ||
+      booking.paymentStatus === 'pending' ||
+      booking.status === 'pending_payment')
 
-  const [tab, setTab] = useState<ManageTab>(isCancelled ? 'details' : 'details')
+  const [tab, setTab] = useState<ManageTab>('details')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,7 +63,6 @@ export function ManageBookingModal({
   const [phone, setPhone] = useState(booking.phone)
   const [email, setEmail] = useState(booking.email || '')
   const [notes, setNotes] = useState(booking.notes || '')
-  const [markTransferred, setMarkTransferred] = useState(booking.status === 'transferred')
   const [detailsResend, setDetailsResend] = useState<'none' | 'both' | 'whatsapp' | 'email'>('none')
   const [slotNames, setSlotNames] = useState<Record<number, string>>(() => {
     const initial: Record<number, string> = {}
@@ -64,8 +77,8 @@ export function ManageBookingModal({
     booking.assignedTableLabels || [],
   )
   const [tablePaymentMode, setTablePaymentMode] = useState<
-    'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'PAY_AT_DOOR' | 'COMPLIMENTARY'
-  >('RAZORPAY')
+    'RAZORPAY' | 'CASH' | 'OFFICER_UPI' | 'COMPLIMENTARY' | 'ADD_TO_DOOR'
+  >(isUnpaidDoorBooking ? 'ADD_TO_DOOR' : 'RAZORPAY')
   const [tableResend, setTableResend] = useState<'none' | 'both' | 'whatsapp' | 'email'>('both')
   const [upgradePendingLink, setUpgradePendingLink] = useState<{
     url: string
@@ -97,8 +110,19 @@ export function ManageBookingModal({
   const [cancelReason, setCancelReason] = useState('')
   const [sendCancelEmail, setSendCancelEmail] = useState(Boolean(booking.email))
 
-  // Compute table pricing delta
-  const existingTableFee = booking.assignedTableFee ?? 0
+  const assignedLabels = useMemo(
+    () => booking.assignedTableLabels || [],
+    [booking.assignedTableLabels],
+  )
+  const existingCatalogFee = useMemo(() => {
+    let sum = 0
+    for (const lbl of assignedLabels) {
+      const t = tables.find((x) => x.tableLabel === lbl)
+      if (t) sum += Math.max(0, Number(t.price) || 0)
+    }
+    return sum
+  }, [assignedLabels, tables])
+  const existingTableFee = Math.max(booking.assignedTableFee ?? 0, existingCatalogFee)
   const newTableFee = useMemo(() => {
     let sum = 0
     for (const lbl of selectedTableLabels) {
@@ -108,8 +132,11 @@ export function ManageBookingModal({
     return sum
   }, [selectedTableLabels, tables])
   const additionalDue = Math.max(0, newTableFee - existingTableFee)
+  const hasTableChanges = useMemo(() => {
+    if (selectedTableLabels.length !== assignedLabels.length) return true
+    return selectedTableLabels.some((lbl) => !assignedLabels.includes(lbl))
+  }, [selectedTableLabels, assignedLabels])
 
-  // Poll payment-status every 3s when waiting on a Razorpay link (table upgrade or pending settlement)
   const isPollingRazorpay = Boolean(upgradePendingLink || settleRazorpayUrl)
   useEffect(() => {
     if (!isPollingRazorpay) return
@@ -126,7 +153,9 @@ export function ManageBookingModal({
             `Table upgrade paid via Razorpay! Tables updated to ${data.tablesSummary || 'new selection'}.`,
           )
         } else if (settleRazorpayUrl && data.paymentStatus === 'paid') {
-          onUpdated(`Payment of ₹${booking.totalAmount.toLocaleString('en-IN')} confirmed via Razorpay!`)
+          onUpdated(
+            `Payment of ₹${booking.totalAmount.toLocaleString('en-IN')} confirmed via Razorpay!`,
+          )
         }
       } catch {
         // retry next interval
@@ -137,9 +166,17 @@ export function ManageBookingModal({
       cancelled = true
       clearInterval(timer)
     }
-  }, [isPollingRazorpay, upgradePendingLink, settleRazorpayUrl, booking.id, booking.totalAmount, onUpdated])
+  }, [
+    isPollingRazorpay,
+    upgradePendingLink,
+    settleRazorpayUrl,
+    booking.id,
+    booking.totalAmount,
+    onUpdated,
+  ])
 
   function toggleTable(label: string) {
+    if (assignedLabels.includes(label)) return
     setSelectedTableLabels((prev) =>
       prev.includes(label) ? prev.filter((x) => x !== label) : [...prev, label],
     )
@@ -167,7 +204,6 @@ export function ManageBookingModal({
           phone,
           email,
           notes,
-          markTransferred,
           attendeeUpdates,
           resendChannels: detailsResend,
         }),
@@ -312,349 +348,252 @@ export function ManageBookingModal({
   )
   const retainedPreview = Math.max(0, effectivePaidAmount - parsedRefundNum)
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/70 p-3 backdrop-blur-sm sm:p-4">
-      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-neutral-200 px-5 py-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-neutral-900 px-2.5 py-0.5 text-[11px] font-bold text-white">
-                {booking.bookingCode}
-              </span>
-              <span className="truncate text-sm font-extrabold text-neutral-950">
-                {booking.holderName}
-              </span>
-              <span className="text-xs font-medium text-neutral-500">
-                · {booking.totalPax} Pax · ₹{booking.totalAmount.toLocaleString('en-IN')}
-              </span>
-            </div>
-            <p className="mt-0.5 text-xs text-neutral-500">{event.name}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-600 transition hover:bg-neutral-200 hover:text-neutral-900"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+  const tabItems: SegmentedTabItem<ManageTab>[] = [
+    { key: 'details', label: 'Details', icon: UserPen },
+    ...(!isCancelled ? [{ key: 'tables' as const, label: 'Tables', icon: Users }] : []),
+    ...(isPendingPayment
+      ? [{ key: 'payment' as const, label: 'Collect Due', icon: CreditCard, tone: 'amber' as const }]
+      : []),
+    ...(!isCancelled
+      ? [{ key: 'cancel' as const, label: 'Cancel', icon: Ban, tone: 'rose' as const }]
+      : []),
+  ]
 
-        {/* Pill Tabs */}
-        <div className="flex gap-1 overflow-x-auto border-b border-neutral-200 bg-neutral-50/80 px-5 py-2.5">
-          <button
-            type="button"
-            onClick={() => {
-              setTab('details')
+  return (
+    <ModalShell
+      title={booking.holderName}
+      badge={<StatusBadge tone="dark">{booking.bookingCode}</StatusBadge>}
+      subtitle={`${event.name} · ${booking.totalPax} Guests · ₹${booking.totalAmount.toLocaleString('en-IN')}`}
+      onClose={onClose}
+      disableClose={submitting}
+      maxWidthClass="max-w-2xl"
+    >
+      <div className="space-y-4">
+        {tabItems.length > 1 && (
+          <SegmentedTabs
+            value={tab}
+            onChange={(next) => {
+              setTab(next)
               setError(null)
             }}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition ${tab === 'details'
-                ? 'bg-neutral-900 text-white'
-                : 'text-neutral-600 hover:bg-neutral-200/70'
-              }`}
-          >
-            <UserPen className="h-3.5 w-3.5" />
-            Details &amp; Guests
-          </button>
+            items={tabItems}
+          />
+        )}
 
-          {!isCancelled && (
-            <button
-              type="button"
-              onClick={() => {
-                setTab('tables')
-                setError(null)
-              }}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition ${tab === 'tables'
-                  ? 'bg-neutral-900 text-white'
-                  : 'text-neutral-600 hover:bg-neutral-200/70'
-                }`}
-            >
-              <Users className="h-3.5 w-3.5" />
-              Tables
-            </button>
-          )}
+        {error && (
+          <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
+            <AlertTriangle className="h-5 w-5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
-          {isPendingPayment && (
-            <button
-              type="button"
-              onClick={() => {
-                setTab('payment')
-                setError(null)
-              }}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition ${tab === 'payment'
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-                }`}
-            >
-              <CreditCard className="h-3.5 w-3.5" />
-              Collect Due
-            </button>
-          )}
-
-          {!isCancelled && (
-            <button
-              type="button"
-              onClick={() => {
-                setTab('cancel')
-                setError(null)
-              }}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition ${tab === 'cancel'
-                  ? 'bg-rose-600 text-white'
-                  : 'text-rose-700 hover:bg-rose-50'
-                }`}
-            >
-              <Ban className="h-3.5 w-3.5" />
-              Cancel &amp; Refund
-            </button>
-          )}
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {error && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {isCancelled && (
-            <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-xs text-rose-900">
-              <div className="font-bold">This booking is cancelled.</div>
-              <div className="mt-1 space-y-0.5 text-rose-800/90">
-                <div>
-                  Paid: <strong>₹{effectivePaidAmount.toLocaleString('en-IN')}</strong> · Refunded:{' '}
-                  <strong>₹{(booking.refundAmount || 0).toLocaleString('en-IN')}</strong>
-                  {booking.refundMethod && booking.refundMethod !== 'NONE'
-                    ? ` (${booking.refundMethod})`
-                    : ''}
-                </div>
-                {booking.refundReference && <div>Ref: {booking.refundReference}</div>}
-                {booking.notes && (
-                  <div className="mt-1 whitespace-pre-wrap text-[11px] text-rose-700">
-                    {booking.notes}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 1: DETAILS & GUESTS */}
-          {tab === 'details' && (
-            <form onSubmit={handleSaveDetails} className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-semibold text-neutral-700">
-                    Booking Holder Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    disabled={isCancelled}
-                    value={holderName}
-                    onChange={(e) => setHolderName(e.target.value)}
-                    className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-neutral-900 focus:outline-none disabled:bg-neutral-100"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-neutral-700">
-                    WhatsApp / Phone *
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    disabled={isCancelled}
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-neutral-900 focus:outline-none disabled:bg-neutral-100"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-neutral-700">Email</label>
-                  <input
-                    type="email"
-                    disabled={isCancelled}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-neutral-900 focus:outline-none disabled:bg-neutral-100"
-                  />
-                </div>
-              </div>
-
-              {/* Guest / Attendee Slots */}
-              {booking.slots && booking.slots.length > 0 && (
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3.5">
-                  <div className="mb-2 text-xs font-bold text-neutral-900">
-                    Individual Guest Names ({booking.slots.length} Pax)
-                  </div>
-                  <div className="space-y-2">
-                    {booking.slots.map((s, idx) => {
-                      const locked = Boolean(s.checkedInAt)
-                      return (
-                        <div key={s.id} className="flex items-center gap-2">
-                          <span className="w-24 shrink-0 truncate font-mono text-[10px] font-semibold text-neutral-500">
-                            {s.ticketCode || `Guest #${idx + 1}`}
-                          </span>
-                          <input
-                            type="text"
-                            disabled={isCancelled || locked}
-                            value={slotNames[s.id] ?? s.attendeeName}
-                            onChange={(e) =>
-                              setSlotNames((prev) => ({ ...prev, [s.id]: e.target.value }))
-                            }
-                            className="flex-1 rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-xs text-neutral-900 focus:border-neutral-900 focus:outline-none disabled:bg-neutral-100 disabled:text-neutral-500"
-                          />
-                          {locked && (
-                            <span
-                              title="Already checked in at gate"
-                              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-800"
-                            >
-                              <Lock className="h-3 w-3" />
-                              In
-                            </span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
+        {isCancelled && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+            <div className="font-extrabold">This booking is cancelled.</div>
+            <div className="mt-1 space-y-1">
               <div>
-                <label className="mb-1 block text-xs font-semibold text-neutral-700">
-                  Booking Notes
-                </label>
-                <textarea
-                  rows={2}
+                Paid: <strong>₹{effectivePaidAmount.toLocaleString('en-IN')}</strong> · Refunded:{' '}
+                <strong>₹{(booking.refundAmount || 0).toLocaleString('en-IN')}</strong>
+                {booking.refundMethod && booking.refundMethod !== 'NONE'
+                  ? ` (${booking.refundMethod})`
+                  : ''}
+              </div>
+              {booking.refundReference && <div>Ref: {booking.refundReference}</div>}
+              {booking.notes && (
+                <div className="whitespace-pre-wrap text-rose-800">{booking.notes}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 1: DETAILS & GUESTS */}
+        {tab === 'details' && (
+          <form onSubmit={handleSaveDetails} className="space-y-4">
+            <div className="grid gap-3.5 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <FieldLabel>Booking Holder Name *</FieldLabel>
+                <TextInput
+                  type="text"
+                  required
                   disabled={isCancelled}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Special seating, dietary, or transfer notes..."
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-xs text-neutral-900 focus:border-neutral-900 focus:outline-none disabled:bg-neutral-100"
+                  value={holderName}
+                  onChange={(e) => setHolderName(e.target.value)}
                 />
               </div>
+              <div>
+                <FieldLabel>WhatsApp / Phone *</FieldLabel>
+                <TextInput
+                  type="tel"
+                  required
+                  disabled={isCancelled}
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
+              </div>
+              <div>
+                <FieldLabel>Email *</FieldLabel>
+                <TextInput
+                  type="email"
+                  disabled={isCancelled}
+                  value={email}
+                  required
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            </div>
 
-              {!isCancelled && (
-                <div className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3.5 sm:flex-row sm:items-center sm:justify-between">
-                  <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-neutral-800">
-                    <input
-                      type="checkbox"
-                      checked={markTransferred}
-                      onChange={(e) => setMarkTransferred(e.target.checked)}
-                      className="h-4 w-4 rounded border-neutral-300 text-neutral-900"
-                    />
-                    <ArrowRightLeft className="h-3.5 w-3.5 text-sky-600" />
-                    Mark booking as Transferred
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-neutral-500">Resend pass:</span>
-                    <select
-                      value={detailsResend}
-                      onChange={(e) =>
-                        setDetailsResend(e.target.value as 'none' | 'both' | 'whatsapp' | 'email')
-                      }
-                      className="rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-800"
-                    >
-                      <option value="none">Don&apos;t resend</option>
-                      <option value="both">WhatsApp + Email</option>
-                      <option value="whatsapp">WhatsApp only</option>
-                      <option value="email">Email only</option>
-                    </select>
-                  </div>
+            {booking.slots && booking.slots.length > 0 && (
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                <div className="mb-3 text-sm font-extrabold text-neutral-950">
+                  Individual Guest Names ({booking.slots.length} Guests)
                 </div>
-              )}
+                <div className="space-y-3">
+                  {booking.slots.map((s, idx) => {
+                    const locked = Boolean(s.checkedInAt)
+                    return (
+                      <div key={s.id} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-xs font-bold text-neutral-600">
+                            {s.ticketCode || `Guest #${idx + 1}`}
+                          </span>
+                          {locked && (
+                            <StatusBadge tone="emerald">
+                              <Lock className="h-3 w-3" />
+                              Checked In
+                            </StatusBadge>
+                          )}
+                        </div>
+                        <TextInput
+                          type="text"
+                          disabled={isCancelled || locked}
+                          value={slotNames[s.id] ?? s.attendeeName}
+                          onChange={(e) =>
+                            setSlotNames((prev) => ({ ...prev, [s.id]: e.target.value }))
+                          }
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
-              {!isCancelled && (
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
+            <div>
+              <FieldLabel>Booking Notes</FieldLabel>
+              <TextArea
+                rows={2}
+                disabled={isCancelled}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Special seating or dietary notes…"
+              />
+            </div>
+
+            {!isCancelled && (
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                <div>
+                  <FieldLabel>Resend Pass After Saving</FieldLabel>
+                  <SelectInput
+                    value={detailsResend}
+                    onChange={(e) =>
+                      setDetailsResend(e.target.value as 'none' | 'both' | 'whatsapp' | 'email')
+                    }
+                  >
+                    <option value="none">Don&apos;t resend</option>
+                    <option value="both">WhatsApp + Email</option>
+                    <option value="whatsapp">WhatsApp only</option>
+                    <option value="email">Email only</option>
+                  </SelectInput>
+                </div>
+              </div>
+            )}
+
+            {!isCancelled && (
+              <div className="flex gap-2.5 pt-2">
+                <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+                  Cancel
+                </Button>
+                <Button type="submit" loading={submitting} className="flex-[1.5]">
+                  Save Changes
+                </Button>
+              </div>
+            )}
+          </form>
+        )}
+
+        {/* TAB 2: TABLES & PAYMENT STEP */}
+        {tab === 'tables' && !isCancelled && (
+          <div className="space-y-4">
+            {upgradePendingLink ? (
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-center">
+                <StatusBadge tone="amber">Awaiting Table Fee Payment</StatusBadge>
+                <div className="mt-2 text-2xl font-extrabold text-neutral-950 tabular-nums">
+                  ₹{upgradePendingLink.additionalDue.toLocaleString('en-IN')}
+                </div>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Scan QR or open link below. Tables assign automatically once paid.
+                </p>
+                <div className="my-4 flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/qr/link?url=${encodeURIComponent(upgradePendingLink.url)}`}
+                    alt="Razorpay Table Upgrade QR"
+                    className="h-48 w-48 rounded-2xl border border-neutral-800 bg-neutral-950 p-3"
+                  />
+                </div>
+                <div className="flex flex-col gap-2.5 sm:flex-row sm:justify-center">
+                  <a
+                    href={upgradePendingLink.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={buttonClasses({ variant: 'primary' })}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Open Razorpay Link
+                  </a>
+                  <Button
                     type="button"
-                    onClick={onClose}
-                    className="rounded-xl border border-neutral-200 px-4 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100"
+                    variant="secondary"
+                    onClick={() => setUpgradePendingLink(null)}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-neutral-900 px-5 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 disabled:opacity-50"
-                  >
-                    {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    Save Changes
-                  </button>
+                    Back / Switch Mode
+                  </Button>
                 </div>
-              )}
-            </form>
-          )}
-
-          {/* TAB 2: TABLES & PAYMENT STEP */}
-          {tab === 'tables' && !isCancelled && (
-            <div className="space-y-4">
-              {upgradePendingLink ? (
-                <div className="rounded-2xl border border-neutral-200 bg-neutral-950 p-5 text-center text-white">
-                  <div className="text-xs font-bold uppercase tracking-widest text-amber-400">
-                    Awaiting Table Fee Payment
-                  </div>
-                  <div className="mt-1 text-xl font-extrabold tabular-nums">
-                    ₹{upgradePendingLink.additionalDue.toLocaleString('en-IN')}
-                  </div>
-                  <p className="mt-1 text-xs text-neutral-400">
-                    Scan QR or open link below. Tables will assign automatically once paid.
-                  </p>
-                  <div className="my-4 flex justify-center">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/qr/link?url=${encodeURIComponent(upgradePendingLink.url)}`}
-                      alt="Razorpay Table Upgrade QR"
-                      className="h-44 w-44 rounded-2xl bg-white p-2"
-                    />
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <a
-                      href={upgradePendingLink.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-neutral-950 hover:bg-neutral-200"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Open Razorpay Link
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => setUpgradePendingLink(null)}
-                      className="rounded-xl border border-white/20 px-4 py-2 text-xs font-semibold text-neutral-300 hover:bg-white/10"
-                    >
-                      Back / Switch Mode
-                    </button>
-                  </div>
-                  <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-emerald-400">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Checking payment status every 3s…
-                  </div>
+                <div className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Checking payment status every 3s…
                 </div>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-neutral-600">
-                      Selected Tables:{' '}
-                      <strong>
-                        {selectedTableLabels.length > 0 ? selectedTableLabels.join(', ') : 'None'}
-                      </strong>
-                    </div>
-                    {newTableFee > 0 && (
-                      <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-[11px] font-semibold text-neutral-700 tabular-nums">
-                        Table total: ₹{newTableFee.toLocaleString('en-IN')}
-                      </span>
-                    )}
-                  </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-sm">
+                  <span className="font-semibold text-neutral-700">
+                    Selected:{' '}
+                    <strong className="text-neutral-950">
+                      {selectedTableLabels.length > 0 ? selectedTableLabels.join(', ') : 'None'}
+                    </strong>
+                  </span>
+                  {newTableFee > 0 && (
+                    <span className="font-extrabold text-neutral-950 tabular-nums">
+                      Table fee: ₹{newTableFee.toLocaleString('en-IN')}
+                    </span>
+                  )}
+                </div>
 
-                  {tables.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-8 text-center text-xs text-neutral-500">
-                      No tables configured for this event. Add tables in Payload Admin first.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {tables.map((t) => {
+                {tables.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-8 text-center text-sm text-neutral-600">
+                    No tables configured for this event. Add tables in Payload Admin first.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                    {[...tables]
+                      .sort((a, b) => {
+                        const mine = booking.assignedTableLabels || []
+                        const rank = (t: DashboardTableCard) =>
+                          mine.includes(t.tableLabel) ? 0 : !t.isReserved ? 1 : 2
+                        return rank(a) - rank(b)
+                      })
+                      .map((t) => {
                         const isMine = (booking.assignedTableLabels || []).includes(t.tableLabel)
                         const reservedByOther = t.isReserved && !isMine
                         const isSelected = selectedTableLabels.includes(t.tableLabel)
@@ -664,22 +603,24 @@ export function ManageBookingModal({
                           <button
                             key={t.tableLabel}
                             type="button"
-                            disabled={reservedByOther}
+                            disabled={reservedByOther || isMine}
                             onClick={() => toggleTable(t.tableLabel)}
-                            className={`flex flex-col items-start justify-between rounded-xl border p-2.5 text-left text-xs transition ${reservedByOther
-                                ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400'
+                            className={`flex min-h-16 flex-col items-start justify-between rounded-xl border p-3 text-left transition ${reservedByOther
+                              ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-500'
+                              : isMine
+                                ? 'cursor-default border-2 border-neutral-950 bg-neutral-900 text-white'
                                 : isSelected
-                                  ? 'border-neutral-900 bg-neutral-900 text-white'
-                                  : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-500'
+                                  ? 'border-2 border-neutral-950 bg-neutral-900 text-white'
+                                  : 'border-neutral-300 bg-white text-neutral-950 hover:border-neutral-500'
                               }`}
                           >
                             <div className="flex w-full items-center justify-between gap-1">
-                              <span className="font-bold">{t.tableLabel}</span>
+                              <span className="text-base font-extrabold">{t.tableLabel}</span>
                               {price > 0 && (
                                 <span
-                                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${isSelected
-                                      ? 'bg-white/20 text-emerald-300'
-                                      : 'bg-neutral-100 text-neutral-900'
+                                  className={`rounded-md px-1.5 py-0.5 text-xs font-bold tabular-nums ${isSelected
+                                    ? 'bg-white/20 text-emerald-300'
+                                    : 'bg-neutral-100 text-neutral-900'
                                     }`}
                                 >
                                   ₹{price.toLocaleString('en-IN')}
@@ -687,15 +628,15 @@ export function ManageBookingModal({
                               )}
                             </div>
                             <div
-                              className={`mt-1 truncate text-[10px] ${isSelected ? 'text-neutral-300' : 'text-neutral-500'
+                              className={`mt-1 truncate text-xs font-medium ${isSelected ? 'text-neutral-300' : 'text-neutral-600'
                                 }`}
                             >
                               {t.tableTypeName || 'Table'}
                             </div>
-                            <div className="mt-1 text-[10px] font-semibold">
+                            <div className="mt-1 text-xs font-bold">
                               {reservedByOther ? (
-                                <span className="text-rose-500">
-                                  Taken · {t.allocations[0]?.bookingCode}
+                                <span className="text-rose-700">
+                                  Reserved
                                 </span>
                               ) : isSelected ? (
                                 <span className="text-emerald-300">
@@ -708,403 +649,377 @@ export function ManageBookingModal({
                           </button>
                         )
                       })}
-                    </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Payment Step when additionalDue > 0 */}
-                  {additionalDue > 0 && (
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-xs font-bold text-emerald-950">
-                            Table Fee Payment Step
-                          </div>
-                          <div className="text-[11px] text-emerald-800">
-                            New tables ₹{newTableFee.toLocaleString('en-IN')} − Paid tables ₹
-                            {existingTableFee.toLocaleString('en-IN')}
-                          </div>
+                {additionalDue > 0 && (
+                  <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-extrabold text-emerald-950">
+                          Table Fee Payment Step
                         </div>
-                        <div className="text-lg font-extrabold text-emerald-700 tabular-nums">
-                          +₹{additionalDue.toLocaleString('en-IN')}
+                        <div className="text-sm text-emerald-800">
+                          New ₹{newTableFee.toLocaleString('en-IN')} − Paid ₹
+                          {existingTableFee.toLocaleString('en-IN')}
                         </div>
                       </div>
-
-                      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {(
-                          [
-                            { key: 'RAZORPAY', label: 'Razorpay QR / Link' },
-                            { key: 'CASH', label: 'Cash' },
-                            { key: 'OFFICER_UPI', label: 'Officer UPI' },
-                            { key: 'PAY_AT_DOOR', label: 'Pay at Door' },
-                            { key: 'COMPLIMENTARY', label: 'Waive Fee (₹0)' },
-                          ] as const
-                        ).map((m) => (
-                          <button
-                            key={m.key}
-                            type="button"
-                            onClick={() => setTablePaymentMode(m.key)}
-                            className={`rounded-xl border px-3 py-2 text-xs font-bold transition ${tablePaymentMode === m.key
-                                ? 'border-neutral-900 bg-neutral-900 text-white'
-                                : 'border-emerald-200 bg-white text-neutral-800 hover:border-neutral-400'
-                              }`}
-                          >
-                            {m.label}
-                          </button>
-                        ))}
+                      <div className="text-xl font-extrabold text-emerald-800 tabular-nums">
+                        +₹{additionalDue.toLocaleString('en-IN')}
                       </div>
                     </div>
-                  )}
 
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-neutral-600">
-                        Notify guest:
-                      </span>
-                      <select
-                        value={tableResend}
-                        onChange={(e) =>
-                          setTableResend(e.target.value as 'none' | 'both' | 'whatsapp' | 'email')
-                        }
-                        className="rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-800"
-                      >
-                        <option value="both">WhatsApp + Email</option>
-                        <option value="whatsapp">WhatsApp only</option>
-                        <option value="email">Email only</option>
-                        <option value="none">Don&apos;t resend</option>
-                      </select>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={onClose}
-                        className="rounded-xl border border-neutral-200 px-4 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={handleSaveTables}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-neutral-900 px-5 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 disabled:opacity-50"
-                      >
-                        {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        {additionalDue > 0 && tablePaymentMode === 'RAZORPAY'
-                          ? `Generate ₹${additionalDue.toLocaleString('en-IN')} Razorpay QR`
-                          : additionalDue > 0 && tablePaymentMode !== 'COMPLIMENTARY'
-                            ? `Collect ₹${additionalDue.toLocaleString('en-IN')} & Save Tables`
-                            : 'Save Tables'}
-                      </button>
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {(isUnpaidDoorBooking
+                        ? ([
+                          { key: 'ADD_TO_DOOR', label: 'Add to Door Balance' },
+                          { key: 'COMPLIMENTARY', label: 'Waive (₹0)' },
+                        ] as const)
+                        : ([
+                          { key: 'RAZORPAY', label: 'Razorpay QR' },
+                          { key: 'CASH', label: 'Cash' },
+                          { key: 'OFFICER_UPI', label: 'Officer UPI' },
+                          { key: 'COMPLIMENTARY', label: 'Waive (₹0)' },
+                        ] as const)
+                      ).map((m) => (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => setTablePaymentMode(m.key)}
+                          className={`min-h-12 rounded-xl border px-3 text-sm font-bold transition ${tablePaymentMode === m.key
+                            ? 'border-neutral-900 bg-neutral-900 text-white'
+                            : 'border-emerald-300 bg-white text-neutral-900 hover:bg-emerald-100/60'
+                            }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                </>
-              )}
-            </div>
-          )}
+                )}
 
-          {/* TAB 3: SETTLE PENDING PAYMENT */}
-          {tab === 'payment' && isPendingPayment && (
-            <div className="space-y-4">
-              {settleRazorpayUrl ? (
-                <div className="rounded-2xl bg-neutral-950 p-5 text-center text-white">
-                  <div className="text-xs font-bold uppercase tracking-widest text-amber-400">
-                    Scan to Pay Pending Balance
+                <div className="space-y-3 border-t border-neutral-200 pt-4">
+                  <div>
+                    <FieldLabel>Notify Guest</FieldLabel>
+                    <SelectInput
+                      value={tableResend}
+                      onChange={(e) =>
+                        setTableResend(e.target.value as 'none' | 'both' | 'whatsapp' | 'email')
+                      }
+                    >
+                      <option value="both">WhatsApp + Email</option>
+                      <option value="whatsapp">WhatsApp only</option>
+                      <option value="email">Email only</option>
+                      <option value="none">Don&apos;t resend</option>
+                    </SelectInput>
                   </div>
-                  <div className="mt-1 text-2xl font-extrabold tabular-nums">
+
+                  <div className="flex gap-2.5">
+                    <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      loading={submitting}
+                      disabled={!hasTableChanges}
+                      onClick={handleSaveTables}
+                      className="flex-[1.5]"
+                    >
+                      {!hasTableChanges
+                        ? 'No Table Changes'
+                        : additionalDue > 0 && tablePaymentMode === 'RAZORPAY'
+                          ? `Generate ₹${additionalDue.toLocaleString('en-IN')} QR`
+                          : additionalDue > 0 && tablePaymentMode === 'ADD_TO_DOOR'
+                            ? `Add ₹${additionalDue.toLocaleString('en-IN')} to Door Total`
+                            : additionalDue > 0 && tablePaymentMode !== 'COMPLIMENTARY'
+                              ? `Collect ₹${additionalDue.toLocaleString('en-IN')} & Save`
+                              : 'Save Tables'}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: SETTLE PENDING PAYMENT */}
+        {tab === 'payment' && isPendingPayment && (
+          <div className="space-y-4">
+            {settleRazorpayUrl ? (
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5 text-center">
+                <StatusBadge tone="amber">Scan to Pay Pending Balance</StatusBadge>
+                <div className="mt-2 text-2xl font-extrabold text-neutral-950 tabular-nums">
+                  ₹{booking.totalAmount.toLocaleString('en-IN')}
+                </div>
+                <div className="my-4 flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/qr/link?url=${encodeURIComponent(settleRazorpayUrl)}`}
+                    alt="Razorpay Payment QR"
+                    className="h-48 w-48 rounded-2xl border border-neutral-800 bg-neutral-950 p-3"
+                  />
+                </div>
+                <div className="flex flex-col gap-2.5 sm:flex-row sm:justify-center">
+                  <a
+                    href={settleRazorpayUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={buttonClasses({ variant: 'primary' })}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Open Razorpay Link
+                  </a>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setSettleRazorpayUrl(null)}
+                  >
+                    Switch to Cash / UPI
+                  </Button>
+                </div>
+                <div className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Checking payment status every 3s…
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                  <div className="text-sm font-bold text-amber-900">Pending Balance Due</div>
+                  <div className="mt-1 text-2xl font-extrabold text-amber-950 tabular-nums">
                     ₹{booking.totalAmount.toLocaleString('en-IN')}
                   </div>
-                  <div className="my-4 flex justify-center">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/qr/link?url=${encodeURIComponent(settleRazorpayUrl)}`}
-                      alt="Razorpay Payment QR"
-                      className="h-44 w-44 rounded-2xl bg-white p-2"
-                    />
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <a
-                      href={settleRazorpayUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-neutral-950 hover:bg-neutral-200"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Open Razorpay Link
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => setSettleRazorpayUrl(null)}
-                      className="rounded-xl border border-white/20 px-4 py-2 text-xs font-semibold text-neutral-300 hover:bg-white/10"
-                    >
-                      Switch to Cash / UPI
-                    </button>
-                  </div>
-                  <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-emerald-400">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Checking payment status every 3s…
+                  <div className="mt-1 text-sm text-amber-900">
+                    Booking status:{' '}
+                    <strong>{isUnpaidDoorBooking ? 'Pay at Door' : booking.status}</strong> ·
+                    Payment: <strong>{booking.paymentMode || 'Not collected yet'}</strong>
                   </div>
                 </div>
-              ) : (
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  {(
+                    [
+                      { key: 'RAZORPAY', label: 'Razorpay QR' },
+                      { key: 'CASH', label: 'Cash Collected' },
+                      { key: 'OFFICER_UPI', label: 'Officer UPI' },
+                      { key: 'COMPLIMENTARY', label: 'Complimentary (₹0)' },
+                    ] as const
+                  ).map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => setSettleMode(m.key)}
+                      className={`min-h-12 rounded-xl border px-3 text-sm font-bold transition ${settleMode === m.key
+                        ? 'border-neutral-900 bg-neutral-900 text-white'
+                        : 'border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50'
+                        }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+
+                {settleMode !== 'RAZORPAY' && (
+                  <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2 text-sm font-bold text-neutral-900">
+                    <input
+                      type="checkbox"
+                      checked={settleResendPass}
+                      onChange={(e) => setSettleResendPass(e.target.checked)}
+                      className="h-6 w-6 rounded accent-neutral-900"
+                    />
+                    <span>Send confirmed Master QR pass via WhatsApp &amp; Email</span>
+                  </label>
+                )}
+
+                <div className="flex gap-2.5 pt-2">
+                  <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="success"
+                    loading={submitting}
+                    onClick={handleSettlePayment}
+                    className="flex-[1.5]"
+                  >
+                    {settleMode === 'RAZORPAY'
+                      ? 'Generate Razorpay QR'
+                      : 'Confirm Payment Received'}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* TAB 4: CANCEL & REFUND */}
+        {tab === 'cancel' && !isCancelled && (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+              <div className="font-extrabold">Cancel Booking &amp; Release Tables</div>
+              <p className="mt-1">
+                Cancelling keeps the audit record, immediately frees reserved tables (
+                {booking.tablesSummary}), and blocks gate check-in for this Master QR.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-bold text-neutral-700">Amount Paid</span>
+                <span className="text-lg font-extrabold text-neutral-950 tabular-nums">
+                  ₹{effectivePaidAmount.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              {effectivePaidAmount > 0 && (
                 <>
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                    <div className="text-xs font-bold text-amber-900">Pending Balance Due</div>
-                    <div className="mt-1 text-2xl font-extrabold text-amber-950 tabular-nums">
-                      ₹{booking.totalAmount.toLocaleString('en-IN')}
-                    </div>
-                    <div className="mt-0.5 text-xs text-amber-800">
-                      Current mode: <strong>{booking.paymentMode}</strong> · Status:{' '}
-                      <strong>{booking.paymentStatus}</strong>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        { key: 'RAZORPAY', label: 'Razorpay QR / Link' },
-                        { key: 'CASH', label: 'Cash Collected' },
-                        { key: 'OFFICER_UPI', label: 'Officer UPI' },
-                        { key: 'COMPLIMENTARY', label: 'Complimentary (₹0)' },
-                      ] as const
-                    ).map((m) => (
+                  <div className="mt-3.5">
+                    <FieldLabel>Refund Amount (₹)</FieldLabel>
+                    <TextInput
+                      type="number"
+                      min={0}
+                      max={effectivePaidAmount}
+                      value={refundAmount}
+                      onChange={(e) => setRefundAmount(e.target.value)}
+                      className="font-bold tabular-nums"
+                    />
+                    <div className="mt-2.5 grid grid-cols-3 gap-2">
                       <button
-                        key={m.key}
                         type="button"
-                        onClick={() => setSettleMode(m.key)}
-                        className={`rounded-xl border px-3 py-2.5 text-xs font-bold transition ${settleMode === m.key
-                            ? 'border-neutral-900 bg-neutral-900 text-white'
-                            : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-400'
-                          }`}
+                        onClick={() => setRefundAmount(String(effectivePaidAmount))}
+                        className="min-h-11 rounded-xl border border-neutral-300 bg-white px-2 text-sm font-bold text-neutral-900 hover:bg-neutral-100"
                       >
-                        {m.label}
+                        Full
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRefundAmount(String(Math.round(effectivePaidAmount / 2)))
+                        }
+                        className="min-h-11 rounded-xl border border-neutral-300 bg-white px-2 text-sm font-bold text-neutral-900 hover:bg-neutral-100"
+                      >
+                        50%
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRefundAmount('0')}
+                        className="min-h-11 rounded-xl border border-neutral-300 bg-white px-2 text-sm font-bold text-neutral-900 hover:bg-neutral-100"
+                      >
+                        ₹0
+                      </button>
+                    </div>
                   </div>
 
-                  {settleMode !== 'RAZORPAY' && (
-                    <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-neutral-700">
-                      <input
-                        type="checkbox"
-                        checked={settleResendPass}
-                        onChange={(e) => setSettleResendPass(e.target.checked)}
-                        className="h-4 w-4 rounded border-neutral-300"
-                      />
-                      Send confirmed Master QR pass via WhatsApp &amp; Email
-                    </label>
+                  <div className="mt-3 flex items-center justify-between rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm">
+                    <span className="font-semibold text-neutral-700">Retained in Net Revenue</span>
+                    <span className="font-extrabold text-emerald-700 tabular-nums">
+                      ₹{retainedPreview.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  {parsedRefundNum > 0 && (
+                    <div className="mt-3.5">
+                      <FieldLabel>Refund Method</FieldLabel>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <button
+                          type="button"
+                          disabled={!canRazorpayRefund}
+                          onClick={() => setRefundMethod('RAZORPAY_API')}
+                          className={`min-h-14 rounded-xl border px-3 py-2.5 text-left transition ${!canRazorpayRefund
+                            ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-500'
+                            : refundMethod === 'RAZORPAY_API'
+                              ? 'border-neutral-900 bg-neutral-900 text-white'
+                              : 'border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50'
+                            }`}
+                        >
+                          <div className="text-sm font-bold">Razorpay API</div>
+                          <div className="text-xs opacity-80">
+                            {canRazorpayRefund ? 'Auto-refund' : 'Not Razorpay'}
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRefundMethod('OFFLINE_CASH')}
+                          className={`min-h-14 rounded-xl border px-3 py-2.5 text-left transition ${refundMethod === 'OFFLINE_CASH'
+                            ? 'border-neutral-900 bg-neutral-900 text-white'
+                            : 'border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50'
+                            }`}
+                        >
+                          <div className="text-sm font-bold">Offline Cash</div>
+                          <div className="text-xs opacity-80">Handed back in cash</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRefundMethod('OFFLINE_UPI')}
+                          className={`min-h-14 rounded-xl border px-3 py-2.5 text-left transition ${refundMethod === 'OFFLINE_UPI'
+                            ? 'border-neutral-900 bg-neutral-900 text-white'
+                            : 'border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50'
+                            }`}
+                        >
+                          <div className="text-sm font-bold">Offline UPI</div>
+                          <div className="text-xs opacity-80">Manual bank / UPI</div>
+                        </button>
+                      </div>
+
+                      {refundMethod !== 'RAZORPAY_API' && (
+                        <div className="mt-3">
+                          <TextInput
+                            type="text"
+                            value={refundReference}
+                            onChange={(e) => setRefundReference(e.target.value)}
+                            placeholder="Optional UPI Ref # or cash receipt note…"
+                          />
+                        </div>
+                      )}
+                    </div>
                   )}
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={onClose}
-                      className="rounded-xl border border-neutral-200 px-4 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      disabled={submitting}
-                      onClick={handleSettlePayment}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      {settleMode === 'RAZORPAY'
-                        ? 'Generate Razorpay QR'
-                        : 'Confirm Payment Received'}
-                    </button>
-                  </div>
                 </>
               )}
             </div>
-          )}
 
-          {/* TAB 4: CANCEL & REFUND */}
-          {tab === 'cancel' && !isCancelled && (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-xs text-rose-900">
-                <div className="font-bold">Cancel Booking &amp; Release Tables</div>
-                <p className="mt-1 text-rose-800">
-                  Cancelling preserves the audit record, immediately releases any reserved tables (
-                  {booking.tablesSummary}), and blocks gate check-in for this Master QR.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-neutral-600">Amount Paid</span>
-                  <span className="text-sm font-extrabold text-neutral-950 tabular-nums">
-                    ₹{effectivePaidAmount.toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                {effectivePaidAmount > 0 && (
-                  <>
-                    <div className="mt-3">
-                      <label className="mb-1 block text-xs font-bold text-neutral-800">
-                        Refund Amount (₹)
-                      </label>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          type="number"
-                          min={0}
-                          max={effectivePaidAmount}
-                          value={refundAmount}
-                          onChange={(e) => setRefundAmount(e.target.value)}
-                          className="w-36 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm font-bold text-neutral-900 tabular-nums focus:border-neutral-900 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setRefundAmount(String(effectivePaidAmount))}
-                          className="rounded-lg bg-neutral-200 px-2.5 py-1.5 text-[11px] font-bold text-neutral-800 hover:bg-neutral-300"
-                        >
-                          Full (₹{effectivePaidAmount.toLocaleString('en-IN')})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRefundAmount(String(Math.round(effectivePaidAmount / 2)))
-                          }
-                          className="rounded-lg bg-neutral-200 px-2.5 py-1.5 text-[11px] font-bold text-neutral-800 hover:bg-neutral-300"
-                        >
-                          50% (₹{Math.round(effectivePaidAmount / 2).toLocaleString('en-IN')})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRefundAmount('0')}
-                          className="rounded-lg bg-neutral-200 px-2.5 py-1.5 text-[11px] font-bold text-neutral-800 hover:bg-neutral-300"
-                        >
-                          ₹0 (No Refund)
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between rounded-xl bg-white px-3 py-2 text-xs ring-1 ring-neutral-200">
-                      <span className="text-neutral-600">Retained in Net Revenue</span>
-                      <span className="font-extrabold text-emerald-700 tabular-nums">
-                        ₹{retainedPreview.toLocaleString('en-IN')}
-                      </span>
-                    </div>
-
-                    {parsedRefundNum > 0 && (
-                      <div className="mt-3">
-                        <label className="mb-1.5 block text-xs font-bold text-neutral-800">
-                          Refund Method
-                        </label>
-                        <div className="grid gap-2 sm:grid-cols-3">
-                          <button
-                            type="button"
-                            disabled={!canRazorpayRefund}
-                            onClick={() => setRefundMethod('RAZORPAY_API')}
-                            className={`rounded-xl border px-3 py-2 text-left text-xs font-bold transition ${!canRazorpayRefund
-                                ? 'cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400'
-                                : refundMethod === 'RAZORPAY_API'
-                                  ? 'border-neutral-900 bg-neutral-900 text-white'
-                                  : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-400'
-                              }`}
-                          >
-                            <div>Razorpay API</div>
-                            <div className="text-[10px] font-normal opacity-80">
-                              {canRazorpayRefund ? 'Auto-refund to source' : 'Not paid via Razorpay'}
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRefundMethod('OFFLINE_CASH')}
-                            className={`rounded-xl border px-3 py-2 text-left text-xs font-bold transition ${refundMethod === 'OFFLINE_CASH'
-                                ? 'border-neutral-900 bg-neutral-900 text-white'
-                                : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-400'
-                              }`}
-                          >
-                            <div>Offline — Cash</div>
-                            <div className="text-[10px] font-normal opacity-80">
-                              Handed back in cash
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRefundMethod('OFFLINE_UPI')}
-                            className={`rounded-xl border px-3 py-2 text-left text-xs font-bold transition ${refundMethod === 'OFFLINE_UPI'
-                                ? 'border-neutral-900 bg-neutral-900 text-white'
-                                : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-400'
-                              }`}
-                          >
-                            <div>Offline — UPI / Bank</div>
-                            <div className="text-[10px] font-normal opacity-80">
-                              Manual UPI / bank transfer
-                            </div>
-                          </button>
-                        </div>
-
-                        {refundMethod !== 'RAZORPAY_API' && (
-                          <div className="mt-2.5">
-                            <input
-                              type="text"
-                              value={refundReference}
-                              onChange={(e) => setRefundReference(e.target.value)}
-                              placeholder="Optional UPI Ref # or cash receipt note..."
-                              className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-xs text-neutral-900 focus:border-neutral-900 focus:outline-none"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-neutral-700">
-                  Cancellation Reason (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  placeholder="e.g. Guest unable to attend, duplicate booking..."
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-xs text-neutral-900 focus:border-neutral-900 focus:outline-none"
-                />
-              </div>
-
-              {booking.email && (
-                <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-neutral-700">
-                  <input
-                    type="checkbox"
-                    checked={sendCancelEmail}
-                    onChange={(e) => setSendCancelEmail(e.target.checked)}
-                    className="h-4 w-4 rounded border-neutral-300"
-                  />
-                  Send cancellation confirmation email to {booking.email}
-                </label>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-xl border border-neutral-200 px-4 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100"
-                >
-                  Keep Booking
-                </button>
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={handleCancelAndRefund}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-rose-700 disabled:opacity-50"
-                >
-                  {submitting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  )}
-                  Confirm Cancellation
-                  {parsedRefundNum > 0
-                    ? ` & Refund ₹${parsedRefundNum.toLocaleString('en-IN')}`
-                    : ''}
-                </button>
-              </div>
+            <div>
+              <FieldLabel>Cancellation Reason (Optional)</FieldLabel>
+              <TextInput
+                type="text"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="e.g. Guest unable to attend, duplicate booking…"
+              />
             </div>
-          )}
-        </div>
+
+            {booking.email && (
+              <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2 text-sm font-bold text-neutral-900">
+                <input
+                  type="checkbox"
+                  checked={sendCancelEmail}
+                  onChange={(e) => setSendCancelEmail(e.target.checked)}
+                  className="h-6 w-6 rounded accent-neutral-900"
+                />
+                <span>Send cancellation email to {booking.email}</span>
+              </label>
+            )}
+
+            <div className="flex gap-2.5 pt-2">
+              <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+                Keep Booking
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                loading={submitting}
+                onClick={handleCancelAndRefund}
+                className="flex-[1.5]"
+              >
+                {!submitting && <CheckCircle2 className="h-4 w-4" />}
+                Confirm Cancel
+                {parsedRefundNum > 0
+                  ? ` & Refund ₹${parsedRefundNum.toLocaleString('en-IN')}`
+                  : ''}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </ModalShell>
   )
 }

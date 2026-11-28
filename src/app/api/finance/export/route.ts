@@ -55,7 +55,7 @@ export async function GET(request: Request) {
       ? sql`AND b.event_id = ${eventId}`
       : sql`AND e.date >= ${fy.startIso} AND e.date <= ${fy.endIso}`
     const netExpr = sql`CASE WHEN b.status != 'cancelled' THEN b.total_amount ELSE GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) END`
-    const revenueWhere = sql`WHERE b.status != 'pending_payment' AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0) ${scopeFilter}`
+    const revenueWhere = sql`WHERE b.status NOT IN ('pending_payment', 'pay_at_door') AND b.payment_status != 'pending' AND (b.status != 'cancelled' OR GREATEST(0, COALESCE(b.paid_amount, 0) - COALESCE(b.refund_amount, 0)) > 0) ${scopeFilter}`
 
     const [bookingsRes, byOfficerRes, byModeRes] = await Promise.all([
       eventId
@@ -87,7 +87,6 @@ export async function GET(request: Request) {
           COALESCE(SUM(CASE WHEN b.payment_mode = 'RAZORPAY' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "razorpayAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'CASH' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "cashAmount",
           COALESCE(SUM(CASE WHEN b.payment_mode = 'OFFICER_UPI' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "upiAmount",
-          COALESCE(SUM(CASE WHEN b.payment_mode = 'PAY_AT_DOOR' THEN ${netExpr} ELSE 0 END), 0)::numeric AS "doorAmount",
           COALESCE(SUM(${netExpr}), 0)::numeric AS "totalAmount",
           COALESCE(SUM(CASE WHEN b.treasurer_verified = true THEN ${netExpr} ELSE 0 END), 0)::numeric AS "verifiedAmount"
         FROM bookings b
@@ -144,7 +143,6 @@ export async function GET(request: Request) {
       { header: 'Razorpay (INR)', key: 'razorpayAmount', width: 16 },
       { header: 'Cash (INR)', key: 'cashAmount', width: 16 },
       { header: 'Officer UPI (INR)', key: 'upiAmount', width: 18 },
-      { header: 'Pay at Door (INR)', key: 'doorAmount', width: 18 },
       { header: 'Total Collected (INR)', key: 'totalAmount', width: 22 },
       { header: 'Verified (INR)', key: 'verifiedAmount', width: 18 },
     ]
@@ -156,7 +154,6 @@ export async function GET(request: Request) {
         razorpayAmount: Number(row.razorpayAmount),
         cashAmount: Number(row.cashAmount),
         upiAmount: Number(row.upiAmount),
-        doorAmount: Number(row.doorAmount),
         totalAmount: Number(row.totalAmount),
         verifiedAmount: Number(row.verifiedAmount),
       })
@@ -191,11 +188,13 @@ export async function GET(request: Request) {
           ? (b.collectedByOfficer as User).name
           : ''
       const statusLabel =
-        b.settlementStatus === 'received_by_treasurer' || b.treasurerVerified
-          ? 'Received by Treasurer'
-          : b.settlementStatus === 'transferred_to_treasurer'
-            ? 'Transferred (Awaiting Receipt)'
-            : 'With Officer'
+        b.status === 'pay_at_door'
+          ? 'Pending at Door'
+          : b.settlementStatus === 'received_by_treasurer' || b.treasurerVerified
+            ? 'Received by Treasurer'
+            : b.settlementStatus === 'transferred_to_treasurer'
+              ? 'Transferred (Awaiting Receipt)'
+              : 'With Officer'
       const paidAmt =
         typeof b.paidAmount === 'number'
           ? b.paidAmount
@@ -204,7 +203,11 @@ export async function GET(request: Request) {
             : 0
       const refundAmt = Number(b.refundAmount) || 0
       const netRetained =
-        b.status === 'cancelled' ? Math.max(0, paidAmt - refundAmt) : b.totalAmount
+        b.status === 'pay_at_door' || b.paymentStatus === 'pending'
+          ? 0
+          : b.status === 'cancelled'
+            ? Math.max(0, paidAmt - refundAmt)
+            : b.totalAmount
       ledgerSheet.addRow({
         bookingCode: b.bookingCode,
         eventName: ev,
@@ -216,7 +219,7 @@ export async function GET(request: Request) {
         refundAmount: refundAmt,
         refundMethod: b.refundMethod || 'NONE',
         netRetained,
-        paymentMode: b.paymentMode,
+        paymentMode: b.paymentMode || '—',
         paymentStatus: b.paymentStatus,
         status: b.status,
         officer,

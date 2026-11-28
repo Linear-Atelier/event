@@ -107,7 +107,7 @@ export async function GET(request: Request) {
         totalPax: b.totalPax,
         totalAmount: b.totalAmount,
         status: b.status,
-        paymentMode: b.paymentMode,
+        paymentMode: b.paymentMode || null,
         paymentStatus: b.paymentStatus,
         tablesSummary: (tablesByBooking.get(b.id) || []).join(', ') || 'Unassigned',
         qrSignature: b.qrSignature || '',
